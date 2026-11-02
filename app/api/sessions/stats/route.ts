@@ -2,8 +2,9 @@ import { NextResponse } from "next/server";
 import { hasJsonContentType, isApiRequestAllowed } from "@/lib/request-security";
 import { getRpcSession } from "@/lib/rpc-manager";
 import { getSessionSettings, openSessionManager, resolveSessionPath } from "@/lib/session-reader";
-import { computeSessionStats, type SessionUsageSummary } from "@/lib/session-stats";
-import { computeSessionTotalActiveMs } from "@/lib/session-timing";
+import { getCachedSessionStats } from "@/lib/perf-cache";
+import { type SessionUsageSummary } from "@/lib/session-stats";
+import { computeLiveSessionTotalActiveMs } from "@/lib/session-timing";
 import { SESSION_ID_PATTERN } from "@/lib/session-ui-state-shared";
 import type { SessionEntry } from "@/lib/types";
 
@@ -49,12 +50,12 @@ async function readSummary(id: string): Promise<SessionUsageSummary | null> {
   const cached = summaries.get(sm);
   if (cached && cached.entryCount === entries.length && cached.lastEntryId === lastEntryId && cached.leafId === leafId) return cached.summary;
 
-  const stats = computeSessionStats(entries as unknown as SessionEntry[]);
+  const stats = getCachedSessionStats(sm, entries as unknown as SessionEntry[]);
   const summary: SessionUsageSummary = {
     tokens: stats.tokens,
     cost: stats.cost,
     toolCalls: stats.toolCalls,
-    totalActiveMs: computeSessionTotalActiveMs(entries),
+    totalActiveMs: computeLiveSessionTotalActiveMs(sm),
     ...getSessionSettings(entries as unknown as SessionEntry[], leafId),
   };
   summaries.set(sm, { entryCount: entries.length, lastEntryId, leafId, summary });
@@ -78,14 +79,20 @@ export async function POST(req: Request) {
   if (ids.length > MAX_SESSION_STATS_IDS) return refusal(400, `ids may hold at most ${MAX_SESSION_STATS_IDS} session ids`);
   if (!ids.every((id) => typeof id === "string" && SESSION_ID_PATTERN.test(id))) return refusal(400, "ids must be session ids");
 
+  const uniqueIds = [...new Set(ids as string[])];
+  const entries = await Promise.all(
+    uniqueIds.map(async (id): Promise<[string, SessionUsageSummary | null]> => {
+      try {
+        return [id, await readSummary(id)];
+      } catch {
+        // Malformed or concurrently removed session: leave it out.
+        return [id, null];
+      }
+    }),
+  );
   const stats: Record<string, SessionUsageSummary> = {};
-  for (const id of new Set(ids as string[])) {
-    try {
-      const summary = await readSummary(id);
-      if (summary) stats[id] = summary;
-    } catch {
-      // Malformed or concurrently removed session: leave it out.
-    }
+  for (const [id, summary] of entries) {
+    if (summary) stats[id] = summary;
   }
   return NextResponse.json({ stats }, { headers: NO_STORE });
 }

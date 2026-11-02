@@ -71,9 +71,10 @@ async function listWithGit(cwd: string): Promise<FileListing | null> {
 function listWithWalk(cwd: string): FileListing {
   const files: string[] = [];
   // BFS so shallow files win when the cap truncates the listing.
+  // Use a cursor index instead of queue.shift() to avoid O(N^2) array reindexing.
   const queue: Array<{ abs: string; rel: string; depth: number }> = [{ abs: cwd, rel: "", depth: 0 }];
-  while (queue.length > 0) {
-    const { abs, rel, depth } = queue.shift()!;
+  for (let head = 0; head < queue.length; head++) {
+    const { abs, rel, depth } = queue[head];
     let dirents: fs.Dirent[];
     try {
       dirents = fs.readdirSync(abs, { withFileTypes: true });

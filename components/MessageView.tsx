@@ -112,7 +112,7 @@ function formatMessageBytes(n: number): string {
  * MarkdownBody with an oversized-content guard: huge messages render as a
  * click-to-reveal plain-text <pre> instead of running the markdown pipeline.
  */
-function SafeMarkdownBody({ children, className, ...props }: React.ComponentProps<typeof MarkdownBody>) {
+const SafeMarkdownBody = memo(function SafeMarkdownBody({ children, className, ...props }: React.ComponentProps<typeof MarkdownBody>) {
   const { t } = useI18n();
   const [showRaw, setShowRaw] = useState(false);
 
@@ -161,7 +161,7 @@ function SafeMarkdownBody({ children, className, ...props }: React.ComponentProp
       </pre>
     </div>
   );
-}
+});
 
 // Cap the user "sent" bubble's height so an abnormally long message does not
 // push the conversation off screen; overflow scrolls inside the bubble.

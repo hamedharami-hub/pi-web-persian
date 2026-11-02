@@ -1,5 +1,6 @@
 import { createReadStream } from "node:fs";
 import { createInterface } from "node:readline";
+import { canSkipSearchJsonLine } from "./perf-cache";
 import type { SessionInfo } from "./types";
 
 const MAX_FILES = 500;
@@ -61,6 +62,7 @@ export async function searchSessionContents(
           response.truncated = true;
           continue;
         }
+        if (canSkipSearchJsonLine(line, needle, matcher)) continue;
         let entry;
         try { entry = JSON.parse(line); } catch { continue; }
         if (entry?.type !== "message" || !["user", "assistant"].includes(entry.message?.role)) continue;

@@ -17,6 +17,25 @@ export interface FileIndexEntry {
   isDir: boolean;
 }
 
+interface EntryMeta {
+  lowerPath: string;
+  lowerName: string;
+  depth: number;
+}
+
+const entryMetaCache = new WeakMap<FileIndexEntry, EntryMeta>();
+
+function getEntryMeta(entry: FileIndexEntry): EntryMeta {
+  let meta = entryMetaCache.get(entry);
+  if (meta) return meta;
+  const lowerPath = entry.path.toLowerCase();
+  const slash = lowerPath.lastIndexOf("/");
+  const lowerName = slash === -1 ? lowerPath : lowerPath.slice(slash + 1);
+  meta = { lowerPath, lowerName, depth: pathDepth(entry.path) };
+  entryMetaCache.set(entry, meta);
+  return meta;
+}
+
 /**
  * Detect an @ file token immediately before the cursor. The @ must be at the
  * start of the text or preceded by whitespace (same rule as the TUI), so
@@ -66,12 +85,18 @@ export function buildEntriesFromFiles(files: string[]): FileIndexEntry[] {
     }
   }
   const entries: FileIndexEntry[] = [];
-  for (const d of dirs) entries.push({ path: d, isDir: true });
+  for (const d of dirs) {
+    const entry: FileIndexEntry = { path: d, isDir: true };
+    getEntryMeta(entry);
+    entries.push(entry);
+  }
   for (const f of files) {
     if (!f) continue;
-    entries.push({ path: f, isDir: false });
+    const entry: FileIndexEntry = { path: f, isDir: false };
+    getEntryMeta(entry);
+    entries.push(entry);
   }
-  entries.sort((a, b) => pathDepth(a.path) - pathDepth(b.path) || a.path.localeCompare(b.path));
+  entries.sort((a, b) => getEntryMeta(a).depth - getEntryMeta(b).depth || a.path.localeCompare(b.path));
   return entries;
 }
 
@@ -94,17 +119,15 @@ function isSubsequence(needle: string, haystack: string): boolean {
  * the query "src/" prefix-matches every entry inside src/ (and excludes the
  * src directory itself, since "src" does not start with "src/").
  */
-function scoreEntry(entry: FileIndexEntry, lowerQuery: string): number {
-  const lowerPath = entry.path.toLowerCase();
+function scoreEntry(entry: FileIndexEntry, lowerQuery: string, hasSlash: boolean): number {
+  const { lowerPath, lowerName } = getEntryMeta(entry);
   let score = 0;
-  if (lowerQuery.includes("/")) {
+  if (hasSlash) {
     if (lowerPath === lowerQuery) score = 100;
     else if (lowerPath.startsWith(lowerQuery)) score = 80;
     else if (lowerPath.includes(lowerQuery)) score = 50;
     else if (isSubsequence(lowerQuery, lowerPath)) score = 10;
   } else {
-    const slash = lowerPath.lastIndexOf("/");
-    const lowerName = slash === -1 ? lowerPath : lowerPath.slice(slash + 1);
     if (lowerName === lowerQuery) score = 100;
     else if (lowerName.startsWith(lowerQuery)) score = 80;
     else if (lowerName.includes(lowerQuery)) score = 50;
@@ -125,14 +148,15 @@ export function filterFileEntries(
   const lowerQuery = query.toLowerCase();
   if (!lowerQuery) return entries.slice(0, limit);
 
-  const scored: Array<{ entry: FileIndexEntry; score: number }> = [];
+  const hasSlash = lowerQuery.includes("/");
+  const scored: Array<{ entry: FileIndexEntry; score: number; depth: number }> = [];
   for (const entry of entries) {
-    const score = scoreEntry(entry, lowerQuery);
-    if (score > 0) scored.push({ entry, score });
+    const score = scoreEntry(entry, lowerQuery, hasSlash);
+    if (score > 0) scored.push({ entry, score, depth: getEntryMeta(entry).depth });
   }
   scored.sort((a, b) =>
     b.score - a.score
-    || pathDepth(a.entry.path) - pathDepth(b.entry.path)
+    || a.depth - b.depth
     || a.entry.path.localeCompare(b.entry.path));
   return scored.slice(0, limit).map((s) => s.entry);
 }

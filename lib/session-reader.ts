@@ -16,6 +16,7 @@ import { MAX_TOOL_RESULT_IMAGE_BYTES, TOOL_RESULT_IMAGE_MIMES } from "./tool-res
 import { resolveProject, type ProjectInfo } from "./worktree";
 import { readSubagentRun, SUBAGENT_META_TYPE } from "./subagents";
 import { checkSessionMembership, listSessionsIncremental, scanSessionFileInfo, type ScannedSessionInfo } from "./session-list-scanner";
+import { getDirectSessionSettings, getEntriesByIdMap } from "./perf-cache";
 
 export { getAgentDir };
 
@@ -676,28 +677,7 @@ export function getLatestModelChange(entries: SessionEntry[]): SessionContext["m
 }
 
 export function getSessionSettings(entries: SessionEntry[], leafId?: string | null): Pick<SessionContext, "thinkingLevel" | "model"> {
-  if (leafId === null) return { thinkingLevel: "off", model: null };
-  const branch = sliceActiveBranch(entries, leafId ?? null, entries.length);
-  let thinkingLevel: string | undefined;
-  let responseModel: SessionContext["model"] | undefined;
-
-  for (let i = branch.length - 1; i >= 0 && (thinkingLevel === undefined || responseModel === undefined); i--) {
-    const entry = branch[i];
-    if (thinkingLevel === undefined && entry.type === "thinking_level_change") {
-      thinkingLevel = entry.thinkingLevel;
-    }
-    if (responseModel === undefined && entry.type === "message" && entry.message.role === "assistant") {
-      const message = entry.message as { provider?: unknown; model?: unknown };
-      if (typeof message.provider === "string" && typeof message.model === "string") {
-        responseModel = { provider: message.provider, modelId: message.model };
-      }
-    }
-  }
-
-  return {
-    thinkingLevel: thinkingLevel ?? "off",
-    model: getLatestModelChange(branch) ?? responseModel ?? null,
-  };
+  return getDirectSessionSettings(entries, leafId);
 }
 
 export interface BuildSessionContextOptions {
@@ -769,8 +749,7 @@ function turnAnchorShape(entry: SessionEntry): Parameters<typeof isMessageGroupA
  * a turn keeps its number as older pages load.
  */
 function countTurnsBefore(entries: SessionEntry[], oldest: SessionEntry): number {
-  const byId = new Map<string, SessionEntry>();
-  for (const e of entries) byId.set(e.id, e);
+  const byId = getEntriesByIdMap(entries);
   let turns = 0;
   let current = oldest.parentId ? byId.get(oldest.parentId) : undefined;
   while (current) {
@@ -818,8 +797,7 @@ export function sliceActiveBranch(
   excludeLeaf = false,
 ): SessionEntry[] {
   if (tail <= 0) return entries;
-  const byId = new Map<string, SessionEntry>();
-  for (const e of entries) byId.set(e.id, e);
+  const byId = getEntriesByIdMap(entries);
 
   let leaf = leafId ? byId.get(leafId) : entries[entries.length - 1];
   // Pagination: `before` is the oldest entry already loaded, so the next page

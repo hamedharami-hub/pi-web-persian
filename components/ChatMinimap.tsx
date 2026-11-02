@@ -165,45 +165,58 @@ export const AssistantOutline = memo(function AssistantOutline({
   markdown: string;
   onHeadingClick?: (headingIndex: number) => void;
   onAnswerClick?: () => void;
+  turnNode?: unknown;
 }) {
   const normalizedMarkdown = useMemo(() => normalizeDisplayMath(markdown), [markdown]);
+  const headingClickRef = useRef(onHeadingClick);
+  headingClickRef.current = onHeadingClick;
+  const answerClickRef = useRef(onAnswerClick);
+  answerClickRef.current = onAnswerClick;
+  const hasHeadingClick = Boolean(onHeadingClick);
+  const hasAnswerClick = Boolean(onAnswerClick);
+  const components = useMemo<ReactMarkdownOptions["components"]>(() => ({
+    h1: ({ children, node }) => <PreviewHeading level={1} headingIndex={getPreviewHeadingIndex(node)} onClick={hasHeadingClick ? (idx) => headingClickRef.current?.(idx) : undefined}>{children}</PreviewHeading>,
+    h2: ({ children, node }) => <PreviewHeading level={2} headingIndex={getPreviewHeadingIndex(node)} onClick={hasHeadingClick ? (idx) => headingClickRef.current?.(idx) : undefined}>{children}</PreviewHeading>,
+    h3: ({ children, node }) => <PreviewHeading level={3} headingIndex={getPreviewHeadingIndex(node)} onClick={hasHeadingClick ? (idx) => headingClickRef.current?.(idx) : undefined}>{children}</PreviewHeading>,
+    h4: () => null,
+    h5: () => null,
+    h6: () => null,
+    p: ({ children }) => (
+      <button
+        type="button"
+        className={styles.paragraph}
+        onClick={hasAnswerClick ? () => answerClickRef.current?.() : undefined}
+      >
+        {children}
+      </button>
+    ),
+    blockquote: () => null,
+    ul: () => null,
+    ol: () => null,
+    pre: () => null,
+    table: () => null,
+    hr: () => null,
+    a: ({ children }) => <>{children}</>,
+    code: ({ children }) => <>{children}</>,
+  }), [hasHeadingClick, hasAnswerClick]);
   if (!markdown) return null;
   return (
     <div className={styles.outline}>
       <ReactMarkdown
         remarkPlugins={previewRemarkPlugins}
         rehypePlugins={previewRehypePlugins}
-        components={{
-          h1: ({ children, node }) => <PreviewHeading level={1} headingIndex={getPreviewHeadingIndex(node)} onClick={onHeadingClick}>{children}</PreviewHeading>,
-          h2: ({ children, node }) => <PreviewHeading level={2} headingIndex={getPreviewHeadingIndex(node)} onClick={onHeadingClick}>{children}</PreviewHeading>,
-          h3: ({ children, node }) => <PreviewHeading level={3} headingIndex={getPreviewHeadingIndex(node)} onClick={onHeadingClick}>{children}</PreviewHeading>,
-          h4: () => null,
-          h5: () => null,
-          h6: () => null,
-          p: ({ children }) => (
-            <button
-              type="button"
-              className={styles.paragraph}
-              onClick={onAnswerClick}
-            >
-              {children}
-            </button>
-          ),
-          blockquote: () => null,
-          ul: () => null,
-          ol: () => null,
-          pre: () => null,
-          table: () => null,
-          hr: () => null,
-          a: ({ children }) => <>{children}</>,
-          code: ({ children }) => <>{children}</>,
-        }}
+        components={components}
       >
         {normalizedMarkdown}
       </ReactMarkdown>
     </div>
   );
-});
+}, (prev, next) => (
+  prev.markdown === next.markdown &&
+  prev.turnNode === next.turnNode &&
+  Boolean(prev.onHeadingClick) === Boolean(next.onHeadingClick) &&
+  Boolean(prev.onAnswerClick) === Boolean(next.onAnswerClick)
+));
 
 function createTurnNodes(turns: TurnInfo[]): NodeInfo[] {
   return turns.map((turn, index) => ({
@@ -836,6 +849,7 @@ export const ChatMinimap = memo(function ChatMinimap({
                       </button>
                       <AssistantOutline
                         markdown={assistant.markdown}
+                        turnNode={node}
                         onAnswerClick={() => scrollToAssistant(node, assistantIndex)}
                         onHeadingClick={(headingIndex) => (
                           scrollToHeading(node, assistantIndex, headingIndex)

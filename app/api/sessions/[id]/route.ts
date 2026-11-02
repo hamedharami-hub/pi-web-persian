@@ -10,9 +10,8 @@ import {
   buildSessionContext,
 } from "@/lib/session-reader";
 import { getRpcSession, renameRpcSession, subagentDisplayStatus } from "@/lib/rpc-manager";
-import { projectTreeForResponse, toSummaryTree } from "@/lib/project-tree";
-import { computeSessionTotalActiveMs } from "@/lib/session-timing";
-import { computeSessionStats } from "@/lib/session-stats";
+import { computeLiveSessionTotalActiveMs } from "@/lib/session-timing";
+import { getCachedSessionStats, getCachedSessionTree } from "@/lib/perf-cache";
 import { startServerPerf } from "@/lib/perf";
 import { computeSessionRevision } from "@/lib/session-revision";
 import type { SessionEntry } from "@/lib/types";
@@ -57,9 +56,7 @@ export async function GET(
     const entries = sm.getEntries();
     const leafId = sm.getLeafId();
     const summaryTree = searchParams.get("tree") === "summary";
-    const tree = summaryTree
-      ? toSummaryTree(projectTreeForResponse(sm.getTree()))
-      : projectTreeForResponse(sm.getTree());
+    const tree = getCachedSessionTree(sm, entries, summaryTree, () => sm.getTree());
     perf?.span("tree");
     const deferThinking = searchParams.has("deferThinking");
     const deferToolResultImages = searchParams.has("deferMedia");
@@ -79,11 +76,11 @@ export async function GET(
       sessionId: id, // local: lazy URLs for historical tool-result images
     }), transcriptNotices);
     perf?.span("context");
-    const totalActiveMs = computeSessionTotalActiveMs(entries);
+    const totalActiveMs = computeLiveSessionTotalActiveMs(sm);
     // Cumulative usage over ALL entries, including history compacted away —
     // the same aggregation the SDK's getSessionStats() uses. Lets the client
     // keep monotonic token/cost counters across compaction and page reloads.
-    const stats = computeSessionStats(entries as unknown as SessionEntry[]);
+    const stats = getCachedSessionStats(sm, entries as unknown as SessionEntry[]);
     perf?.span("stats");
     // Opaque freshness token for the session view cache. Derived from the
     // disk fingerprint and the actual read source; null tells the client the

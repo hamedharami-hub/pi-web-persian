@@ -1,8 +1,9 @@
-# Persian presentation overlay
+# Persian presentation & performance overlay
 
 Based on upstream v0.13.0. Scope: message prose, Markdown lists/quotes/tables,
-oversized raw messages, and the chat composer. No account, model, session,
-authentication, or UI-language changes.
+oversized raw messages, the chat composer, and low-conflict performance
+optimizations across hot paths. No account, model, session, authentication, or
+UI-language changes.
 
 Prose blocks choose direction from the dominant Arabic/Hebrew versus Latin
 letters, not the first strong character. A tie in mixed prose favours RTL;
@@ -13,6 +14,53 @@ composer, Markdown code/URLs do not choose direction; a leading `!` shell
 command stays LTR. Explicit RTL/LTR direction avoids CSS `unicode-bidi:
 plaintext`, which would otherwise override it for a Latin-first sentence.
 Multi-paragraph drafts still share one textarea direction (not per-paragraph).
+
+## Performance & upstream-friendly (zero-conflict) design
+
+To keep `git rebase` against upstream `@agegr/pi-web` releases effortless, custom
+logic lives in standalone modules (`lib/text-direction.ts`, `lib/perf-cache.ts`,
+and `bin/sync-upstream.sh`) with minimal 1-to-3 line touchpoints in upstream files:
+
+- **`lib/text-direction.ts`**:
+  - Bounded script sampling (`4 KB` prose / `8 KB` composer) + single-entry
+    memoization so multi-megabyte raw messages and keystrokes in `ChatInput`
+    stay sub-millisecond.
+  - Single-pass bottom-up `rehypeProseDirection()` HAST plugin (moved out of
+    `lib/markdown.ts` so `lib/markdown.ts` only carries a 1-line import).
+- **`components/MessageView.tsx` & `components/ChatMinimap.tsx`**:
+  - `SafeMarkdownBody` is wrapped in `React.memo` so hover state toggles on
+    message bubbles do not re-render or re-scan message bodies.
+  - `AssistantOutline` in `ChatMinimap.tsx` memoizes `ReactMarkdown` `components`
+    via refs and compares `turnNode` so `onMouseMove` across the minimap never
+    re-parses assistant Markdown outlines.
+- **`hooks/useStreamingSelector.ts`**:
+  - Coalesces bursty mid-frame SSE streaming deltas via `requestAnimationFrame`
+    (after painting the first delta of each frame immediately) while keeping
+    boolean selectors and stream start/end transitions synchronous.
+- **`lib/perf-cache.ts`**:
+  - `getEntriesByIdMap()`: mutation-safe `WeakMap` index of `SessionEntry[]` so
+    `sliceActiveBranch`, `countTurnsBefore`, `getSessionSettings`, and
+    `collectTranscriptNotices` share one lookup map instead of rebuilding
+    `new Map()` repeatedly.
+  - `getDirectSessionSettings()`: resolves active branch `model` and
+    `thinkingLevel` by walking `parentId` from `leafId` without copying or
+    reversing the full branch array.
+  - `getCachedSessionStats()` & `getCachedSessionTree()`: `WeakMap` caches on
+    `SessionManager` instances shared by `GET /api/sessions/[id]` and
+    `POST /api/sessions/stats` (alongside `computeLiveSessionTotalActiveMs` and
+    concurrent `Promise.all` stats reads).
+  - `getCachedTranscriptNotices()`: caches computed cache-miss/warm notices per
+    `(entries, leafId)` across history pagination requests.
+  - `canSkipSearchJsonLine()`: fast pre-filter in `lib/session-search.ts` that
+    skips non-message lines and non-matching plain lines before `JSON.parse`.
+- **`lib/file-fuzzy.ts` & `app/api/file-index/route.ts`**:
+  - `WeakMap`-cached `{ lowerPath, lowerName, depth }` per `FileIndexEntry` and
+    an $O(1)$ cursor index replacing `queue.shift()` in `listWithWalk`.
+- **`bin/sync-upstream.sh`**:
+  - Automated upstream synchronization helper (`./bin/sync-upstream.sh --check`
+    and `./bin/sync-upstream.sh --apply`) that verifies zero-conflict rebasing
+    with `git merge-tree`, creates a safety backup branch, rebases onto
+    `agegr/pi-web`, and runs verification tests.
 
 Production launcher: `/home/ubuntu/.config/pi-web/start.sh`.
 The original installed package at `/usr/lib/node_modules/@agegr/pi-web` is left

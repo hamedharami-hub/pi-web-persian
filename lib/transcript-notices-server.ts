@@ -3,6 +3,7 @@ import { readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import type { AgentUsage, SessionEntry } from "./types";
 import { withTranscriptNotices, type TranscriptNotice } from "./transcript-notices";
+import { getCachedTranscriptNotices, getEntriesByIdMap } from "./perf-cache";
 
 // The notices pi's TUI shows when `showCacheMissNotices` is on (#1265), derived
 // from session entries so a reload, a reconnect or an older page shows the same
@@ -220,8 +221,7 @@ export function collectTranscriptNotices(
   options: { leafId?: string | null } = {},
 ): Map<string, TranscriptNotice[]> {
   const notices = new Map<string, TranscriptNotice[]>();
-  const byId = new Map<string, SessionEntry>();
-  for (const entry of entries) byId.set(entry.id, entry);
+  const byId = getEntriesByIdMap(entries);
   const ancestor = (entry: SessionEntry, match: (candidate: SessionEntry) => boolean): SessionEntry | undefined => {
     let current = entry.parentId ? byId.get(entry.parentId) : undefined;
     while (current && !match(current)) current = current.parentId ? byId.get(current.parentId) : undefined;
@@ -405,7 +405,12 @@ export function readSessionTranscriptNotices(options: {
   models?: NoticeModelLookup;
 }): Map<string, TranscriptNotice[]> | undefined {
   if (!options.cwd || !readShowCacheMissNotices(options.cwd)) return undefined;
-  return collectTranscriptNotices(options.entries, withSessionPrices(options.entries, options.models), { leafId: options.leafId });
+  return getCachedTranscriptNotices(
+    options.entries,
+    options.leafId,
+    Boolean(options.models),
+    () => collectTranscriptNotices(options.entries, withSessionPrices(options.entries, options.models), { leafId: options.leafId }),
+  );
 }
 
 /** `context` with each message carrying the notices of its entry. */
