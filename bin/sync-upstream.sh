@@ -67,7 +67,7 @@ if [ "$base" = "$target" ]; then
 fi
 
 echo "New upstream commits in $TARGET_REF:"
-git log --oneline "$base..$TARGET_REF" | head -n 20
+git log --oneline -n 20 "$base..$TARGET_REF"
 
 conflict=0
 git merge-tree --write-tree HEAD "$TARGET_REF" >/dev/null 2>&1 || conflict=1
