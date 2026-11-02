@@ -60,7 +60,10 @@ and `bin/sync-upstream.sh`) with minimal 1-to-3 line touchpoints in upstream fil
   - Automated upstream synchronization helper (`./bin/sync-upstream.sh --check`
     and `./bin/sync-upstream.sh --apply`) that verifies zero-conflict rebasing
     with `git merge-tree`, creates a safety backup branch, rebases onto
-    `agegr/pi-web`, and runs verification tests.
+    `agegr/pi-web` (reusing the existing `origin` remote instead of adding a
+    duplicate), runs `tsc --noEmit` plus the overlay tests, and pushes the
+    rewritten branch to `backup/main` with `--force-with-lease` so the cron
+    deploy pipeline (`~/.config/pi-web/sync.sh`) picks it up.
 
 Production launcher: `/home/ubuntu/.config/pi-web/start.sh`.
 The original installed package at `/usr/lib/node_modules/@agegr/pi-web` is left
