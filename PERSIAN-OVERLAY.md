@@ -33,3 +33,5 @@ runtime changes, rebuilt in `~/projects/pi-web-build`, swapped into `.next` and
 applied with a PM2 restart plus an HTTP health check — only while the app is
 idle. Docs-only changes skip the rebuild. Pause with
 `touch ~/.config/pi-web/sync.pause`; log at `~/.config/pi-web/sync.log`.
+
+Sync pipeline verified end-to-end on 2026-11-02 (GitHub pull and local push).
