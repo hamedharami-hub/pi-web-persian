@@ -22,3 +22,14 @@ and restart only PM2 process `pi-web-ui`.
 Build in this isolated source directory, not in the installed package or a
 running development server. Targeted tests were run with user approval. A source change alone does not
 publish the production UI; build/restart and live-page checks are separate.
+
+## Two-way sync with GitHub
+
+Since 2026-11-02 `~/.config/pi-web/sync.sh` runs from cron every three minutes.
+Local edits in this directory are committed and pushed to `backup/main`
+(`hamedharami-hub/pi-web-persian`) after a secret/size check. Commits that
+arrive on `main` from anywhere else are fetched, rebased when needed and, for
+runtime changes, rebuilt in `~/projects/pi-web-build`, swapped into `.next` and
+applied with a PM2 restart plus an HTTP health check — only while the app is
+idle. Docs-only changes skip the rebuild. Pause with
+`touch ~/.config/pi-web/sync.pause`; log at `~/.config/pi-web/sync.log`.
