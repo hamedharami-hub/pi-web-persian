@@ -314,6 +314,27 @@ test("the composer stays editable while compacting and says messages queue", () 
   assert.match(html, /placeholder="Compacting… messages queue until it finishes"/);
 });
 
+test("composer follows Persian prose even after an English prefix, without moving shell commands", () => {
+  const draftKey = "new:/tmp/bidi-composer-test";
+  try {
+    for (const [value, direction] of [
+      ["A این جمله فارسی است", "rtl"],
+      ["Hello متن فارسی ادامه دارد", "rtl"],
+      ["1 متن فارسی ادامه دارد", "rtl"],
+      ["Hello world", "ltr"],
+      ["!echo سلام", "ltr"],
+      ["123", "auto"],
+    ]) {
+      setDraft(draftKey, { value, images: [] });
+      const html = renderToStaticMarkup(React.createElement(I18nProvider, null,
+        React.createElement(ChatInput, { onSend() {}, onAbort() {}, isStreaming: false, draftKey })));
+      assert.match(html, new RegExp(`<textarea[^>]*dir="${direction}"`), value);
+    }
+  } finally {
+    clearDraft(draftKey);
+  }
+});
+
 test("ignores a pointer click that reaches Stop's slot just as the run ends", () => {
   assert.equal(isRunEndStrayClick(1, 0), true);
   assert.equal(isRunEndStrayClick(2, RUN_END_CLICK_GUARD_MS - 1), true);

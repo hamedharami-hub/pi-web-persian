@@ -10,6 +10,7 @@ import remarkCjkFriendly from "remark-cjk-friendly/parseOnly";
 import remarkMath from "remark-math";
 import type { Plugin } from "unified";
 import type { Extension } from "micromark-util-types";
+import { proseDirection } from "./text-direction";
 
 // Link schemes of desktop apps that open a note, a file or a meeting (#1108).
 // A fixed list, not "any scheme but javascript:": the text comes from the model
@@ -750,9 +751,54 @@ function rehypeDisplayMathSource() {
   };
 }
 
+/** Each visible prose block picks its own base direction, not its first letter's. */
+function rehypeProseDirection() {
+  const blocks = new Set(["p", "h1", "h2", "h3", "h4", "h5", "h6", "ul", "ol", "li", "blockquote", "th", "td"]);
+  const prose = (node: HastRoot | HastContent): string => {
+    if (node.type === "text") return node.value;
+    if (node.type === "element") {
+      if (["code", "pre", "math"].includes(node.tagName)) return "";
+      // An autolink's visible URL is not prose, but a human-readable link label is.
+      if (node.tagName === "a") {
+        const label = node.children.map(prose).join("");
+        if (/^(?:https?:\/\/|www\.|file:\/\/|mailto:)[^\s]+$/i.test(label.trim())) return "";
+        return label;
+      }
+    }
+    return "children" in node ? node.children.map(prose).join("") : "";
+  };
+  return (tree: HastRoot) => {
+    const visit = (node: HastRoot | HastElement) => {
+      for (const child of node.children) {
+        if (child.type !== "element") continue;
+        if (child.tagName === "ul" || child.tagName === "ol") {
+          // A long English item must not put the markers of two Persian items
+          // on the left. Count the immediate items, not their combined length.
+          const itemDirections = child.children
+            .filter((item): item is HastElement => item.type === "element" && item.tagName === "li")
+            .map((item) => proseDirection(prose(item)));
+          const rtlItems = itemDirections.filter((direction) => direction === "rtl").length;
+          const ltrItems = itemDirections.filter((direction) => direction === "ltr").length;
+          child.properties.dir = rtlItems ? rtlItems >= ltrItems ? "rtl" : "ltr"
+            : ltrItems ? "ltr" : "auto";
+        } else if (blocks.has(child.tagName)) {
+          child.properties.dir = proseDirection(prose(child));
+        }
+        if (["pre", "code"].includes(child.tagName)) {
+          child.properties.dir = "ltr";
+          continue;
+        }
+        visit(child);
+      }
+    };
+    visit(tree);
+  };
+}
+
 export const markdownRehypePlugins: ReactMarkdownOptions["rehypePlugins"] = [
   rehypeRaw,
   [rehypeSanitize, markdownSanitizeSchema],
+  rehypeProseDirection,
   rehypeMatchClobberedIds,
   rehypeDisplayMathSource,
   [rehypeKatex, { throwOnError: false, strict: false }],
@@ -786,6 +832,7 @@ function markdownHeadingAnchors() {
 export const markdownDocumentRehypePlugins: ReactMarkdownOptions["rehypePlugins"] = [
   rehypeRaw,
   [rehypeSanitize, markdownSanitizeSchema],
+  rehypeProseDirection,
   markdownHeadingAnchors,
   rehypeDisplayMathSource,
   [rehypeKatex, { throwOnError: false, strict: false }],

@@ -230,7 +230,7 @@ export const MarkdownBody = memo(function MarkdownBody({ children, className, is
   }), [cwd, isStreaming, onOpenFile, onNavigateLink]);
 
   return (
-    <div className={["markdown-body", className].filter(Boolean).join(" ")}>
+    <div dir="auto" className={["markdown-body", className].filter(Boolean).join(" ")}>
       {blocks.map((block, index) => (
         <MarkdownBlock
           key={index}

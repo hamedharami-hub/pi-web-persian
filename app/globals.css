@@ -1125,6 +1125,7 @@ pre, code {
 }
 
 .markdown-body {
+  text-align: start;
   min-width: 0;
   max-width: 100%;
   overflow-x: hidden;
@@ -1132,6 +1133,22 @@ pre, code {
   line-height: 1.7;
   color: var(--text);
   word-break: break-word;
+}
+.chat-input-textarea {
+  text-align: start;
+}
+/* `plaintext` ignores explicit dir and reverts to first-strong: A + Persian
+   would jump left even after the prose heuristic chose RTL. */
+.chat-input-textarea[dir="auto"] {
+  unicode-bidi: plaintext;
+}
+.markdown-body .markdown-inline-code {
+  direction: ltr;
+  unicode-bidi: isolate;
+}
+.markdown-body .katex-display {
+  direction: ltr;
+  unicode-bidi: isolate;
 }
 .markdown-body p { margin: 0 0 8px; }
 .markdown-body p:last-child { margin-bottom: 0; }
@@ -1151,13 +1168,14 @@ pre, code {
 .markdown-body h2 { font-size: 1.08em; }
 .markdown-body h3 { font-size: 0.98em; color: color-mix(in srgb, var(--text) 88%, var(--text-muted)); }
 .markdown-body ul, .markdown-body ol {
-  padding-left: 22px;
+  padding-inline-start: 22px;
+  padding-inline-end: 0;
   margin: 5px 0 8px;
   list-style-position: outside;
 }
 /* Room for the widest bold "N. " marker; MarkdownBody sets the digit count. */
-.markdown-body ol { padding-left: calc(0.8em + var(--ol-marker-digits, 2) * 0.62em); }
-.markdown-body li { margin: 3px 0; padding-left: 2px; }
+.markdown-body ol { padding-inline-start: calc(0.8em + var(--ol-marker-digits, 2) * 0.62em); }
+.markdown-body li { margin: 3px 0; padding-inline-start: 2px; }
 .markdown-body ul > li { list-style-type: disc; }
 .markdown-body ol > li { list-style-type: decimal; }
 .markdown-body li > p { margin: 0; }
@@ -1257,7 +1275,7 @@ pre, code {
   transform: rotate(45deg) translateY(-1px);
 }
 .markdown-body blockquote {
-  border-left: 3px solid color-mix(in srgb, var(--border) 75%, var(--text-muted));
+  border-inline-start: 3px solid color-mix(in srgb, var(--border) 75%, var(--text-muted));
   border-radius: 0 6px 6px 0;
   margin: 6px 0;
   padding: 6px 11px;
@@ -1288,7 +1306,7 @@ pre, code {
   border: 0;
   border-bottom: 1px solid var(--border);
   padding: 6px 10px;
-  text-align: left;
+  text-align: start;
   vertical-align: top;
 }
 .markdown-body tr:last-child td { border-bottom: 0; }
@@ -1429,6 +1447,9 @@ pre, code {
 }
 
 .markdown-code-block {
+  direction: ltr;
+  text-align: left;
+  unicode-bidi: isolate;
   position: relative;
   width: 100%;
   min-width: 0;

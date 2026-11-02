@@ -27,6 +27,16 @@ function renderMarkdown(markdown, props = {}) {
   );
 }
 
+test("finished and streaming mixed-script blocks keep independent directions", () => {
+  const markdown = "A این جمله فارسی است\n\nEnglish only paragraph\n\n1 متن فارسی ادامه دارد";
+  for (const isStreaming of [false, true]) {
+    const html = renderMarkdown(markdown, { isStreaming });
+    assert.equal((html.match(/<p dir="rtl">/g) ?? []).length, 2);
+    assert.equal((html.match(/<p dir="ltr">/g) ?? []).length, 1);
+    assert.match(html, /<p dir="rtl">A این جمله فارسی است<\/p>/);
+  }
+});
+
 test("a document reader keeps local links in the page without an href", () => {
   const local = renderMarkdown("[relative](references/setup.md#config) [anchor](#config) [outside](../outside.md) [absolute](/etc/test.md) [attachment](image.png)", { onOpenFile: undefined, onNavigateLink() {} });
   assert.equal((local.match(/<a role="link" tabindex="0">/g) ?? []).length, 5);
@@ -375,11 +385,11 @@ test("leaves explicit markdown links, CJK paths and query strings intact", () =>
 });
 
 test("turns line endings into <br> only when asked to keep line breaks", () => {
-  assert.match(renderMarkdown("one\ntwo"), /<p>one\ntwo<\/p>/);
+  assert.match(renderMarkdown("one\ntwo"), /<p dir="ltr">one\ntwo<\/p>/);
   assert.doesNotMatch(renderMarkdown("one\ntwo"), /<br/);
 
   for (const markdown of ["one\ntwo", "one\r\ntwo", "one\rtwo", "one   \t\n   two"]) {
-    assert.match(renderMarkdown(markdown, { keepLineBreaks: true }), /<p>one<br\/>two<\/p>/);
+    assert.match(renderMarkdown(markdown, { keepLineBreaks: true }), /<p dir="ltr">one<br\/>two<\/p>/);
   }
 });
 
@@ -388,11 +398,11 @@ test("keeps typed line breaks in tight list items and headings", () => {
   const nested = renderMarkdown("- outer\n  more\n  - inner\n- next", { keepLineBreaks: true });
   const heading = renderMarkdown("Heading one\nheading two\n===", { keepLineBreaks: true });
 
-  assert.match(ordered, /<li>看门狗的原理是（ ）<br\/>A\. 监控温度<br\/>B\. 计数器<\/li>/);
-  assert.match(ordered, /<li>下一题<\/li>/);
+  assert.match(ordered, /<li dir="ltr">看门狗的原理是（ ）<br\/>A\. 监控温度<br\/>B\. 计数器<\/li>/);
+  assert.match(ordered, /<li dir="auto">下一题<\/li>/);
   // The newline before a nested list separates blocks, so it must not become a <br>.
-  assert.match(nested, /<li>outer<br\/>more\n<ul>\n<li>inner<\/li>/);
-  assert.match(heading, /<h1>Heading one<br\/>heading two<\/h1>/);
+  assert.match(nested, /<li dir="ltr">outer<br\/>more\n<ul dir="ltr">\n<li dir="ltr">inner<\/li>/);
+  assert.match(heading, /<h1 dir="ltr">Heading one<br\/>heading two<\/h1>/);
   assert.doesNotMatch(renderMarkdown("- alpha\n\n- beta", { keepLineBreaks: true }), /<br/);
 });
 
@@ -401,7 +411,7 @@ test("renders a hard break once when keeping line breaks", () => {
   // bubble's pre-wrap paragraphs would show as a blank line.
   const html = renderMarkdown("trailing spaces  \nbackslash\\\nend", { keepLineBreaks: true });
 
-  assert.match(html, /<p>trailing spaces<br\/>backslash<br\/>end<\/p>/);
+  assert.match(html, /<p dir="ltr">trailing spaces<br\/>backslash<br\/>end<\/p>/);
 });
 
 test("leaves code and math line endings alone when keeping line breaks", () => {
@@ -448,14 +458,14 @@ test("shows a user message's HTML as the text typed, like pi's TUI", () => {
   // #1407: the tag was parsed by rehype-raw and stripped by the sanitizer.
   const sample = '<TableOperator v-model="columns" :tableId="TABLE_ID_CONST.BUSINESS.${basic.businessModule.toUpperCase()}.Demo" :refresh="queryData" /> 咋更离谱呢，要不就去掉 ${basic.businessModule.toUpperCase()} 不要这个变量，直接拼后面部分';
   const escaped = sample.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
-  assert.equal(renderMarkdown(sample, { keepLineBreaks: true }), `<div class="markdown-body"><p>${escaped}</p></div>`);
+  assert.equal(renderMarkdown(sample, { keepLineBreaks: true }), `<div dir="auto" class="markdown-body"><p dir="ltr">${escaped}</p></div>`);
 
   // Inline and block HTML, raw-text tags included, keep their characters and line breaks.
-  assert.match(renderMarkdown("normal <kbd>Ctrl</kbd>\nline two", { keepLineBreaks: true }), /<p>normal &lt;kbd&gt;Ctrl&lt;\/kbd&gt;<br\/>line two<\/p>/);
-  assert.match(renderMarkdown("Use a <textarea> here\nand a button", { keepLineBreaks: true }), /<p>Use a &lt;textarea&gt; here<br\/>and a button<\/p>/);
-  assert.match(renderMarkdown("<div>\n<b>hi</b>\n</div>\n\nafter", { keepLineBreaks: true }), /<p>&lt;div&gt;<br\/>&lt;b&gt;hi&lt;\/b&gt;<br\/>&lt;\/div&gt;<\/p>\n<p>after<\/p>/);
-  assert.match(renderMarkdown("- item <script>a()</script>\n- <!-- note -->", { keepLineBreaks: true }), /<li>item &lt;script&gt;a\(\)&lt;\/script&gt;<\/li>\n<li>&lt;!-- note --&gt;<\/li>/);
-  assert.match(renderMarkdown("> <img src=x onerror=alert(1)>", { keepLineBreaks: true }), /<blockquote>\n<p>&lt;img src=x onerror=alert\(1\)&gt;<\/p>\n<\/blockquote>/);
+  assert.match(renderMarkdown("normal <kbd>Ctrl</kbd>\nline two", { keepLineBreaks: true }), /<p dir="ltr">normal &lt;kbd&gt;Ctrl&lt;\/kbd&gt;<br\/>line two<\/p>/);
+  assert.match(renderMarkdown("Use a <textarea> here\nand a button", { keepLineBreaks: true }), /<p dir="ltr">Use a &lt;textarea&gt; here<br\/>and a button<\/p>/);
+  assert.match(renderMarkdown("<div>\n<b>hi</b>\n</div>\n\nafter", { keepLineBreaks: true }), /<p dir="ltr">&lt;div&gt;<br\/>&lt;b&gt;hi&lt;\/b&gt;<br\/>&lt;\/div&gt;<\/p>\n<p dir="ltr">after<\/p>/);
+  assert.match(renderMarkdown("- item <script>a()</script>\n- <!-- note -->", { keepLineBreaks: true }), /<li dir="ltr">item &lt;script&gt;a\(\)&lt;\/script&gt;<\/li>\n<li dir="ltr">&lt;!-- note --&gt;<\/li>/);
+  assert.match(renderMarkdown("> <img src=x onerror=alert(1)>", { keepLineBreaks: true }), /<blockquote dir="ltr">\n<p dir="ltr">&lt;img src=x onerror=alert\(1\)&gt;<\/p>\n<\/blockquote>/);
 
   // Markdown around it still renders; code keeps its own text; assistant text keeps rendering HTML.
   const mixed = renderMarkdown("**bold** <u>x</u> [link](https://example.com) `<b>`\n\n```html\n<p>code</p>\n```", { keepLineBreaks: true });

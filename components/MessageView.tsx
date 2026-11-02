@@ -3,6 +3,7 @@
 import { Fragment, memo, useState, useRef, useEffect, useMemo, type CSSProperties } from "react";
 import ReactMarkdown from "react-markdown";
 import { MarkdownBody } from "./MarkdownBody";
+import { proseDirection } from "@/lib/text-direction";
 import { ImagePreview } from "./ImagePreview";
 import { ThinkingIcon } from "./ThinkingIcon";
 import { copyText } from "@/lib/clipboard";
@@ -140,10 +141,14 @@ function SafeMarkdownBody({ children, className, ...props }: React.ComponentProp
       </button>
     );
   }
+  const rawDirection = proseDirection(children);
   return (
     <div className={className} style={{ maxHeight: 420, overflow: "auto", fontSize: "calc(12px + var(--chat-font-size-offset, 0px))", lineHeight: 1.5 }}>
       <pre
+        dir={rawDirection}
         style={{
+          textAlign: "start",
+          unicodeBidi: rawDirection === "auto" ? "plaintext" : "normal",
           margin: 0,
           padding: "8px 10px",
           whiteSpace: "pre-wrap",
