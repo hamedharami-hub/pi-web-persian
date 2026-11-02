@@ -52,6 +52,12 @@ fi
 
 echo "Fetching $upstream_remote ..."
 git fetch "$upstream_remote" --tags --prune
+if ! git rev-parse --verify -q "$TARGET_REF" >/dev/null 2>&1; then
+  # A partial or single-tag clone has no branch refspec yet; fetch the upstream
+  # branches so the default target resolves.
+  echo "Resolving $TARGET_REF ..."
+  git fetch "$upstream_remote" "+refs/heads/*:refs/remotes/$upstream_remote/*"
+fi
 
 base="$(git merge-base HEAD "$TARGET_REF")"
 target="$(git rev-parse "$TARGET_REF")"
