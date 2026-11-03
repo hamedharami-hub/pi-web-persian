@@ -13,7 +13,7 @@ const React = await jiti.import("react");
 const { renderToStaticMarkup } = await jiti.import("react-dom/server");
 const { ChatInput, ModelErrorBanner, ModelScopeWarningBanner, RUN_END_CLICK_GUARD_MS, autoGrowTextarea, canClearBuiltinCommandInput, canRestoreUserMessage, canRunBuiltinSlashCommandWhileStreaming, cycleListIndex, filterModelOptions, getUpwardMenuMaxHeight, getUserMessageText, getUserMessageDraftImages, isExactSlashCommand, isRunEndStrayClick, modelSupportsImageInput, offersBuiltinSlashCommandWhileStreaming, replaceLinksWithMarkdown, readImageFile, replaceTextareaRange, stacksComposerLayout, submitsSlashCommandOnEnter } = await jiti.import("./ChatInput.tsx");
 const { isBareMcpCommand } = await jiti.import("@/lib/mcp-command");
-const { ModelSelector } = await jiti.import("./ModelSelector.tsx");
+const { ModelSelector, findStarredModelOption, groupModelOptionsByProvider } = await jiti.import("./ModelSelector.tsx");
 // As ChatInput.tsx imports it: on Windows jiti loads "@/lib/draft-store.ts"
 // as a second copy, and ChatInput would never see the drafts set here (#1211).
 const { clearDraft, getDraft, mergeRestoredSubmissionDraft, mergeRestoredSubmissionText, rekeyDraft, setDraft } = await jiti.import("@/lib/draft-store");
@@ -576,6 +576,21 @@ test("filters model options by name, id, provider and provider/id", () => {
   assert.deepEqual(filterModelOptions(options, "gpt-5.4"), [options[2], options[3]]);
   assert.equal(filterModelOptions(options, "missing").length, 0);
   assert.equal(filterModelOptions(options, "  "), options);
+});
+
+test("groups model providers without reordering and finds the starred default model", () => {
+  const options = [
+    { provider: "openai", modelId: "gpt-5.4", name: "GPT-5.4" },
+    { provider: "anthropic", modelId: "claude-sonnet-4-6", name: "Claude Sonnet 4.6" },
+    { provider: "openai", modelId: "gpt-5.3", name: "GPT-5.3" },
+  ];
+
+  assert.deepEqual(groupModelOptionsByProvider(options), [
+    { provider: "openai", options: [options[0], options[2]] },
+    { provider: "anthropic", options: [options[1]] },
+  ]);
+  assert.equal(findStarredModelOption(options, { provider: "anthropic", modelId: "claude-sonnet-4-6" }), options[1]);
+  assert.equal(findStarredModelOption(options, { provider: "openai", modelId: "missing" }), undefined);
 });
 
 test("renders the shared field model selector as a disabled gray control", () => {

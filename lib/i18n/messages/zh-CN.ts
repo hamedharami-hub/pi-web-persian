@@ -792,6 +792,7 @@ export const zhCNLocale: LocalePlugin = {
     "chat.previewImage": "预览图片",
     "chat.filterModels": "筛选模型…",
     "chat.noMatchingModels": "没有匹配的模型",
+    "chat.starredModels": "已加星号的模型",
     "chat.saveDefaultModel": "使用并设为新会话默认模型",
     "chat.defaultModel": "新会话默认模型",
     "chat.saveDefaultThinking": "使用并设为新会话默认推理级别",
