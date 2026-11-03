@@ -4,7 +4,11 @@ import { join } from "node:path";
 // Synthetic catalog in a fresh composer: nothing is selected or prompted.
 export async function checkModelSelector(page, { base, project, artifacts }) {
   const mobile = page.viewportSize().width <= 640;
-  const models = Array.from({ length: 40 }, (_, i) => ({ provider: "e2e", id: `model-${i}`, name: `Model ${i}` }));
+  const models = [
+    ...Array.from({ length: 40 }, (_, i) => ({ provider: "e2e", id: `model-${i}`, name: `Model ${i}`, free: false })),
+    { provider: "free-a", id: "free-zero", name: "Free Zero", free: true },
+    { provider: "free-b", id: "free-one", name: "Free One", free: true },
+  ];
   const modelRoute = /\/api\/models(?:\?|$)/;
   await page.route(modelRoute, (route) => route.fulfill({ json: {
     models: Object.fromEntries(models.map((m) => [`${m.provider}/${m.id}`, m.name])),
@@ -56,7 +60,15 @@ export async function checkModelSelector(page, { base, project, artifacts }) {
     }
     await page.keyboard.press("Escape");
     await page.getByRole("listbox").waitFor({ state: "detached" });
-    console.log(`PASS: ${page.viewportSize().width}px model picker filter stays visible${mobile ? " above the keyboard" : ""}`);
+
+    // The Free tab collects zero-cost models from different providers in one flat list.
+    await trigger.click();
+    const picker = page.getByRole("listbox");
+    await picker.getByRole("tab", { name: /Free models/ }).click();
+    await picker.getByRole("option", { name: /Free Zero/ }).waitFor();
+    await picker.getByRole("option", { name: /Free One/ }).waitFor();
+    assert.equal(await picker.getByRole("option", { name: "Model 0", exact: true }).count(), 0);
+    console.log(`PASS: ${page.viewportSize().width}px model picker filter stays visible${mobile ? " above the keyboard" : ""}; free models are grouped in one tab`);
   } finally {
     await page.evaluate(() => {
       for (const key of ["height", "offsetTop"]) delete window.visualViewport[key];

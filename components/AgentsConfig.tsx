@@ -207,6 +207,7 @@ export function AgentsConfig({
     provider: model.provider,
     modelId: model.id,
     name: model.name,
+    free: model.free,
   })), [modelOptions]);
 
   const loadProfiles = useCallback(async (preferredKey?: string) => {

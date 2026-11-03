@@ -29,7 +29,10 @@ await writeFile(join(agentDir, "models.json"), JSON.stringify({
       baseUrl: "https://example.invalid/v1",
       apiKey: "sk-test",
       api: "openai-completions",
-      models: [{ id: "one", name: "Acme One" }],
+      models: [
+        { id: "one", name: "Acme One", cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } },
+        { id: "paid", name: "Acme Paid", cost: { input: 1, output: 2, cacheRead: 0, cacheWrite: 0 } },
+      ],
     },
   },
 }, null, 2));
@@ -74,7 +77,9 @@ test("a removed worktree is listed from the repo it branched from", async () => 
   // Not merely some list: the same one the repo answers, which is what a session that ran
   // without worktree isolation gets.
   assert.deepEqual(fromRemoved.body, fromRepo.body);
-  assert.deepEqual(fromRemoved.body.modelList.map((m) => `${m.provider}:${m.id}`), ["acme:one"], "an empty list would make the comparison say nothing");
+  assert.deepEqual(fromRemoved.body.modelList.map((m) => `${m.provider}:${m.id}`), ["acme:one", "acme:paid"], "an empty list would make the comparison say nothing");
+  assert.equal(fromRemoved.body.modelList.find((m) => m.id === "one")?.free, true);
+  assert.equal(fromRemoved.body.modelList.find((m) => m.id === "paid")?.free, false);
 });
 
 test("the repo a removed worktree falls back to is authorized as any other cwd", async () => {

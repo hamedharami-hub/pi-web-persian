@@ -9,6 +9,8 @@ export interface ModelSelectorOption {
   provider: string;
   modelId: string;
   name: string;
+  /** The provider charges no tokens for this model. */
+  free?: boolean;
 }
 
 interface ModelSelectorProps {
@@ -61,6 +63,11 @@ export function groupModelOptionsByProvider(options: ModelSelectorOption[]): Mod
   return groups;
 }
 
+/** Keeps only models whose provider charges no tokens. */
+export function filterFreeModelOptions(options: ModelSelectorOption[]): ModelSelectorOption[] {
+  return options.filter((option) => option.free);
+}
+
 /** Finds the saved default model, which is the model marked with a filled star. */
 export function findStarredModelOption(
   options: ModelSelectorOption[],
@@ -95,14 +102,19 @@ export function ModelSelector({
   const [open, setOpen] = useState(false);
   const [anchorRect, setAnchorRect] = useState<{ top: number; right: number; bottom: number; left: number; width: number } | null>(null);
   const [filter, setFilter] = useState("");
+  const [listView, setListView] = useState<"all" | "free">("all");
   const [openProvider, setOpenProvider] = useState<string | null>(null);
   const locked = disabled || busy;
   // Options arrive in pi's /model order (orderSelectorModels()); never re-sort
   // them, or a models.json provider loses the order its file gives (#783).
   const filteredOptions = filterModelOptions(options, filter);
   const showFilter = options.length > MODEL_FILTER_THRESHOLD;
-  const modelsByProvider = groupModelOptionsByProvider(filteredOptions);
-  const starredOption = onSetDefault ? findStarredModelOption(filteredOptions, defaultValue) : undefined;
+  const freeOptions = filterFreeModelOptions(options);
+  const visibleOptions = listView === "free" ? filterFreeModelOptions(filteredOptions) : filteredOptions;
+  const modelsByProvider = groupModelOptionsByProvider(visibleOptions);
+  const starredOption = onSetDefault && listView === "all"
+    ? findStarredModelOption(filteredOptions, defaultValue)
+    : undefined;
 
   const currentName = selectedLabel ?? (value
     ? options.find((option) => option.modelId === value.modelId && option.provider === value.provider)?.name ?? value.modelId
@@ -152,6 +164,11 @@ export function ModelSelector({
     setOpen(false);
     setFilter("");
   }, [locked]);
+
+  // A catalog refresh can remove the last free model while the picker is open.
+  useEffect(() => {
+    if (listView === "free" && freeOptions.length === 0) setListView("all");
+  }, [freeOptions.length, listView]);
 
   const buttonStyle: CSSProperties = variant === "field"
     ? {
@@ -204,6 +221,22 @@ export function ModelSelector({
     setFilter("");
     onSetDefault?.(option.provider, option.modelId);
   };
+
+  const renderModelRow = (option: ModelSelectorOption, showProvider = false) => (
+    <SelectorRow
+      key={`${option.provider}:${option.modelId}`}
+      active={option.modelId === value?.modelId && option.provider === value?.provider}
+      onSelect={() => choose(option)}
+      star={onSetDefault ? {
+        isDefault: option.modelId === defaultValue?.modelId && option.provider === defaultValue?.provider,
+        saveLabel: t("chat.saveDefaultModel"),
+        defaultLabel: t("chat.defaultModel"),
+        onSave: () => saveDefault(option),
+      } : undefined}
+    >
+      <OptionLabel label={option.name} provider={showProvider ? option.provider : undefined} />
+    </SelectorRow>
+  );
 
   return (
     <div
@@ -313,6 +346,51 @@ export function ModelSelector({
               boxShadow: openAbove ? "0 -4px 16px rgba(0,0,0,0.10)" : "0 4px 16px rgba(0,0,0,0.10)",
             }}
           >
+            {freeOptions.length > 0 && (
+              <div
+                role="tablist"
+                aria-label={t("chat.modelListTabs")}
+                style={{
+                  display: "flex", flexShrink: 0, gap: 4,
+                  padding: "6px 8px", borderBottom: "1px solid var(--border)",
+                }}
+              >
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={listView === "all"}
+                  onClick={() => setListView("all")}
+                  style={{
+                    flex: 1, minWidth: 0, padding: "5px 8px",
+                    border: listView === "all" ? "1px solid var(--border)" : "1px solid transparent",
+                    borderRadius: 5,
+                    background: listView === "all" ? "var(--bg-hover)" : "transparent",
+                    color: listView === "all" ? "var(--text)" : "var(--text-dim)",
+                    cursor: "pointer", fontSize: 11, fontWeight: listView === "all" ? 600 : 400,
+                    whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+                  }}
+                >
+                  {t("chat.allModels")} ({options.length})
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={listView === "free"}
+                  onClick={() => setListView("free")}
+                  style={{
+                    flex: 1, minWidth: 0, padding: "5px 8px",
+                    border: listView === "free" ? "1px solid var(--border)" : "1px solid transparent",
+                    borderRadius: 5,
+                    background: listView === "free" ? "var(--bg-hover)" : "transparent",
+                    color: listView === "free" ? "var(--text)" : "var(--text-dim)",
+                    cursor: "pointer", fontSize: 11, fontWeight: listView === "free" ? 600 : 400,
+                    whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+                  }}
+                >
+                  {t("chat.freeModels")} ({freeOptions.length})
+                </button>
+              </div>
+            )}
             {showFilter && (
               <div style={{ flexShrink: 0, padding: "6px 8px", borderBottom: "1px solid var(--border)" }}>
                 <input
@@ -343,82 +421,76 @@ export function ModelSelector({
               </div>
             )}
             <div style={{ minHeight: 0, overflowY: "auto" }}>
-              {starredOption && (
-                <section className="model-starred-section" aria-label={t("chat.starredModels")}>
-                  <div style={{ padding: "7px 12px 4px", color: "var(--text-dim)", fontSize: 10, fontWeight: 600, textTransform: "uppercase" }}>
-                    {t("chat.starredModels")}
+              {listView === "free" ? (
+                visibleOptions.length === 0 ? (
+                  <div style={{ padding: "8px 12px", color: "var(--text-dim)", fontSize: 12, whiteSpace: "nowrap" }}>
+                    {t("chat.noMatchingModels")}
                   </div>
-                  <SelectorRow
-                    active={starredOption.modelId === value?.modelId && starredOption.provider === value?.provider}
-                    onSelect={() => choose(starredOption)}
-                    star={{
-                      isDefault: true,
-                      saveLabel: t("chat.saveDefaultModel"),
-                      defaultLabel: t("chat.defaultModel"),
-                      onSave: () => saveDefault(starredOption),
-                    }}
-                  >
-                    <OptionLabel label={starredOption.name} />
-                  </SelectorRow>
-                </section>
-              )}
-              {onClear && !filter.trim() && (
-                <SelectorRow active={!value} gutter={Boolean(onSetDefault)} onSelect={() => {
-                  setOpen(false);
-                  setFilter("");
-                  onClear();
-                }}>
-                  <OptionLabel label={emptyLabel ?? "Default"} />
-                </SelectorRow>
-              )}
-              {modelsByProvider.length === 0 ? (
-                <div style={{ padding: "8px 12px", color: "var(--text-dim)", fontSize: 12, whiteSpace: "nowrap" }}>
-                  {filter.trim() ? t("chat.noMatchingModels") : "No available models"}
-                </div>
-              ) : modelsByProvider.map((group) => {
-                const expanded = Boolean(filter.trim()) || openProvider === group.provider;
-                return (
-                  <section className="model-provider-group" key={group.provider}>
-                    <button
-                      type="button"
-                      className="model-provider-header"
-                      aria-expanded={expanded}
-                      onClick={() => setOpenProvider((current) => current === group.provider ? null : group.provider)}
-                      style={{
-                        display: "flex", alignItems: "center", gap: 7,
-                        width: "100%", padding: "7px 10px 7px 12px",
-                        border: "none", borderTop: "1px solid var(--border)",
-                        background: "transparent", color: "var(--text-dim)",
-                        cursor: "pointer", fontSize: 10, fontWeight: 600,
-                        textAlign: "left", textTransform: "uppercase",
-                      }}
-                    >
-                      <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{group.provider}</span>
-                      <span style={{ marginLeft: "auto", color: "var(--text-dim)", fontSize: 10, fontWeight: 400 }}>{group.options.length}</span>
-                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ flexShrink: 0, transform: expanded ? "rotate(180deg)" : "none", transition: "transform 0.12s" }}>
-                        <polyline points="6 9 12 15 18 9" />
-                      </svg>
-                    </button>
-                    {expanded && group.options.map((option) => {
-                      return (
-                        <SelectorRow
-                          key={`${option.provider}:${option.modelId}`}
-                          active={option.modelId === value?.modelId && option.provider === value?.provider}
-                          onSelect={() => choose(option)}
-                          star={onSetDefault ? {
-                            isDefault: option.modelId === defaultValue?.modelId && option.provider === defaultValue?.provider,
-                            saveLabel: t("chat.saveDefaultModel"),
-                            defaultLabel: t("chat.defaultModel"),
-                            onSave: () => saveDefault(option),
-                          } : undefined}
+                ) : visibleOptions.map((option) => renderModelRow(option, true))
+              ) : (
+                <>
+                  {starredOption && (
+                    <section className="model-starred-section" aria-label={t("chat.starredModels")}>
+                      <div style={{ padding: "7px 12px 4px", color: "var(--text-dim)", fontSize: 10, fontWeight: 600, textTransform: "uppercase" }}>
+                        {t("chat.starredModels")}
+                      </div>
+                      <SelectorRow
+                        active={starredOption.modelId === value?.modelId && starredOption.provider === value?.provider}
+                        onSelect={() => choose(starredOption)}
+                        star={{
+                          isDefault: true,
+                          saveLabel: t("chat.saveDefaultModel"),
+                          defaultLabel: t("chat.defaultModel"),
+                          onSave: () => saveDefault(starredOption),
+                        }}
+                      >
+                        <OptionLabel label={starredOption.name} />
+                      </SelectorRow>
+                    </section>
+                  )}
+                  {onClear && !filter.trim() && (
+                    <SelectorRow active={!value} gutter={Boolean(onSetDefault)} onSelect={() => {
+                      setOpen(false);
+                      setFilter("");
+                      onClear();
+                    }}>
+                      <OptionLabel label={emptyLabel ?? "Default"} />
+                    </SelectorRow>
+                  )}
+                  {modelsByProvider.length === 0 ? (
+                    <div style={{ padding: "8px 12px", color: "var(--text-dim)", fontSize: 12, whiteSpace: "nowrap" }}>
+                      {filter.trim() ? t("chat.noMatchingModels") : "No available models"}
+                    </div>
+                  ) : modelsByProvider.map((group) => {
+                    const expanded = Boolean(filter.trim()) || openProvider === group.provider;
+                    return (
+                      <section className="model-provider-group" key={group.provider}>
+                        <button
+                          type="button"
+                          className="model-provider-header"
+                          aria-expanded={expanded}
+                          onClick={() => setOpenProvider((current) => current === group.provider ? null : group.provider)}
+                          style={{
+                            display: "flex", alignItems: "center", gap: 7,
+                            width: "100%", padding: "7px 10px 7px 12px",
+                            border: "none", borderTop: "1px solid var(--border)",
+                            background: "transparent", color: "var(--text-dim)",
+                            cursor: "pointer", fontSize: 10, fontWeight: 600,
+                            textAlign: "left", textTransform: "uppercase",
+                          }}
                         >
-                          <OptionLabel label={option.name} />
-                        </SelectorRow>
-                      );
-                    })}
-                  </section>
-                );
-              })}
+                          <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{group.provider}</span>
+                          <span style={{ marginLeft: "auto", color: "var(--text-dim)", fontSize: 10, fontWeight: 400 }}>{group.options.length}</span>
+                          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ flexShrink: 0, transform: expanded ? "rotate(180deg)" : "none", transition: "transform 0.12s" }}>
+                            <polyline points="6 9 12 15 18 9" />
+                          </svg>
+                        </button>
+                        {expanded && group.options.map((option) => renderModelRow(option))}
+                      </section>
+                    );
+                  })}
+                </>
+              )}
             </div>
           </div>
         );
@@ -427,6 +499,22 @@ export function ModelSelector({
   );
 }
 
-function OptionLabel({ label }: { label: string }) {
-  return <span title={label} style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{label}</span>;
+function OptionLabel({ label, provider }: { label: string; provider?: string }) {
+  return (
+    <span style={{ display: "flex", alignItems: "center", gap: 7, minWidth: 0, flex: 1 }}>
+      <span title={label} style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{label}</span>
+      {provider && (
+        <span
+          title={provider}
+          style={{
+            flexShrink: 0, maxWidth: 110, overflow: "hidden", textOverflow: "ellipsis",
+            padding: "1px 5px", border: "1px solid var(--border)", borderRadius: 4,
+            color: "var(--text-dim)", fontSize: 9, fontWeight: 400,
+          }}
+        >
+          {provider}
+        </span>
+      )}
+    </span>
+  );
 }

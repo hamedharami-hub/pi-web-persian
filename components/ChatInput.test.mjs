@@ -13,7 +13,7 @@ const React = await jiti.import("react");
 const { renderToStaticMarkup } = await jiti.import("react-dom/server");
 const { ChatInput, ModelErrorBanner, ModelScopeWarningBanner, RUN_END_CLICK_GUARD_MS, autoGrowTextarea, canClearBuiltinCommandInput, canRestoreUserMessage, canRunBuiltinSlashCommandWhileStreaming, cycleListIndex, filterModelOptions, getUpwardMenuMaxHeight, getUserMessageText, getUserMessageDraftImages, isExactSlashCommand, isRunEndStrayClick, modelSupportsImageInput, offersBuiltinSlashCommandWhileStreaming, replaceLinksWithMarkdown, readImageFile, replaceTextareaRange, stacksComposerLayout, submitsSlashCommandOnEnter } = await jiti.import("./ChatInput.tsx");
 const { isBareMcpCommand } = await jiti.import("@/lib/mcp-command");
-const { ModelSelector, findStarredModelOption, groupModelOptionsByProvider } = await jiti.import("./ModelSelector.tsx");
+const { ModelSelector, filterFreeModelOptions, findStarredModelOption, groupModelOptionsByProvider } = await jiti.import("./ModelSelector.tsx");
 // As ChatInput.tsx imports it: on Windows jiti loads "@/lib/draft-store.ts"
 // as a second copy, and ChatInput would never see the drafts set here (#1211).
 const { clearDraft, getDraft, mergeRestoredSubmissionDraft, mergeRestoredSubmissionText, rekeyDraft, setDraft } = await jiti.import("@/lib/draft-store");
@@ -576,6 +576,16 @@ test("filters model options by name, id, provider and provider/id", () => {
   assert.deepEqual(filterModelOptions(options, "gpt-5.4"), [options[2], options[3]]);
   assert.equal(filterModelOptions(options, "missing").length, 0);
   assert.equal(filterModelOptions(options, "  "), options);
+});
+
+test("collects free models from every provider without reordering them", () => {
+  const options = [
+    { provider: "openrouter", modelId: "model:free", name: "Free model", free: true },
+    { provider: "openai", modelId: "gpt-5.4", name: "GPT-5.4", free: false },
+    { provider: "local", modelId: "qwen", name: "Qwen", free: true },
+  ];
+
+  assert.deepEqual(filterFreeModelOptions(options), [options[0], options[2]]);
 });
 
 test("groups model providers without reordering and finds the starred default model", () => {
