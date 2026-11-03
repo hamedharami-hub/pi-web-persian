@@ -792,6 +792,7 @@ export const enLocale: LocalePlugin = {
     "chat.previewImage": "Preview image",
     "chat.filterModels": "Filter models…",
     "chat.noMatchingModels": "No matching models",
+    "chat.starredModels": "Starred models",
     "chat.saveDefaultModel": "Use and save as default for new chats",
     "chat.defaultModel": "Default model for new chats",
     "chat.saveDefaultThinking": "Use and save as default reasoning level",

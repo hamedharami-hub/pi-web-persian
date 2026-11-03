@@ -45,6 +45,32 @@ export function filterModelOptions(options: ModelSelectorOption[], query: string
   ));
 }
 
+export interface ModelProviderGroup {
+  provider: string;
+  options: ModelSelectorOption[];
+}
+
+/** Groups models without changing either provider order or model order. */
+export function groupModelOptionsByProvider(options: ModelSelectorOption[]): ModelProviderGroup[] {
+  const groups: ModelProviderGroup[] = [];
+  for (const option of options) {
+    const group = groups.find((item) => item.provider === option.provider);
+    if (group) group.options.push(option);
+    else groups.push({ provider: option.provider, options: [option] });
+  }
+  return groups;
+}
+
+/** Finds the saved default model, which is the model marked with a filled star. */
+export function findStarredModelOption(
+  options: ModelSelectorOption[],
+  defaultValue?: { provider: string; modelId: string } | null,
+): ModelSelectorOption | undefined {
+  return options.find((option) => (
+    option.provider === defaultValue?.provider && option.modelId === defaultValue?.modelId
+  ));
+}
+
 export function ModelSelector({
   options,
   value,
@@ -69,18 +95,14 @@ export function ModelSelector({
   const [open, setOpen] = useState(false);
   const [anchorRect, setAnchorRect] = useState<{ top: number; right: number; bottom: number; left: number; width: number } | null>(null);
   const [filter, setFilter] = useState("");
+  const [openProvider, setOpenProvider] = useState<string | null>(null);
   const locked = disabled || busy;
   // Options arrive in pi's /model order (orderSelectorModels()); never re-sort
   // them, or a models.json provider loses the order its file gives (#783).
   const filteredOptions = filterModelOptions(options, filter);
   const showFilter = options.length > MODEL_FILTER_THRESHOLD;
-  const modelsByProvider: { provider: string; options: ModelSelectorOption[] }[] = [];
-
-  for (const option of filteredOptions) {
-    const group = modelsByProvider.find((item) => item.provider === option.provider);
-    if (group) group.options.push(option);
-    else modelsByProvider.push({ provider: option.provider, options: [option] });
-  }
+  const modelsByProvider = groupModelOptionsByProvider(filteredOptions);
+  const starredOption = onSetDefault ? findStarredModelOption(filteredOptions, defaultValue) : undefined;
 
   const currentName = selectedLabel ?? (value
     ? options.find((option) => option.modelId === value.modelId && option.provider === value.provider)?.name ?? value.modelId
@@ -321,6 +343,25 @@ export function ModelSelector({
               </div>
             )}
             <div style={{ minHeight: 0, overflowY: "auto" }}>
+              {starredOption && (
+                <section className="model-starred-section" aria-label={t("chat.starredModels")}>
+                  <div style={{ padding: "7px 12px 4px", color: "var(--text-dim)", fontSize: 10, fontWeight: 600, textTransform: "uppercase" }}>
+                    {t("chat.starredModels")}
+                  </div>
+                  <SelectorRow
+                    active={starredOption.modelId === value?.modelId && starredOption.provider === value?.provider}
+                    onSelect={() => choose(starredOption)}
+                    star={{
+                      isDefault: true,
+                      saveLabel: t("chat.saveDefaultModel"),
+                      defaultLabel: t("chat.defaultModel"),
+                      onSave: () => saveDefault(starredOption),
+                    }}
+                  >
+                    <OptionLabel label={starredOption.name} />
+                  </SelectorRow>
+                </section>
+              )}
               {onClear && !filter.trim() && (
                 <SelectorRow active={!value} gutter={Boolean(onSetDefault)} onSelect={() => {
                   setOpen(false);
@@ -334,32 +375,50 @@ export function ModelSelector({
                 <div style={{ padding: "8px 12px", color: "var(--text-dim)", fontSize: 12, whiteSpace: "nowrap" }}>
                   {filter.trim() ? t("chat.noMatchingModels") : "No available models"}
                 </div>
-              ) : modelsByProvider.map((group, index) => (
-                <div key={group.provider}>
-                  {modelsByProvider.length > 1 && (
-                    <div style={{ padding: "6px 12px 4px", borderTop: index > 0 || onClear ? "1px solid var(--border)" : "none", color: "var(--text-dim)", fontSize: 10, fontWeight: 600, letterSpacing: 0, textTransform: "uppercase" }}>
-                      {group.provider}
-                    </div>
-                  )}
-                  {group.options.map((option) => {
-                    return (
-                      <SelectorRow
-                        key={`${option.provider}:${option.modelId}`}
-                        active={option.modelId === value?.modelId && option.provider === value?.provider}
-                        onSelect={() => choose(option)}
-                        star={onSetDefault ? {
-                          isDefault: option.modelId === defaultValue?.modelId && option.provider === defaultValue?.provider,
-                          saveLabel: t("chat.saveDefaultModel"),
-                          defaultLabel: t("chat.defaultModel"),
-                          onSave: () => saveDefault(option),
-                        } : undefined}
-                      >
-                        <OptionLabel label={option.name} />
-                      </SelectorRow>
-                    );
-                  })}
-                </div>
-              ))}
+              ) : modelsByProvider.map((group) => {
+                const expanded = Boolean(filter.trim()) || openProvider === group.provider;
+                return (
+                  <section className="model-provider-group" key={group.provider}>
+                    <button
+                      type="button"
+                      className="model-provider-header"
+                      aria-expanded={expanded}
+                      onClick={() => setOpenProvider((current) => current === group.provider ? null : group.provider)}
+                      style={{
+                        display: "flex", alignItems: "center", gap: 7,
+                        width: "100%", padding: "7px 10px 7px 12px",
+                        border: "none", borderTop: "1px solid var(--border)",
+                        background: "transparent", color: "var(--text-dim)",
+                        cursor: "pointer", fontSize: 10, fontWeight: 600,
+                        textAlign: "left", textTransform: "uppercase",
+                      }}
+                    >
+                      <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{group.provider}</span>
+                      <span style={{ marginLeft: "auto", color: "var(--text-dim)", fontSize: 10, fontWeight: 400 }}>{group.options.length}</span>
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ flexShrink: 0, transform: expanded ? "rotate(180deg)" : "none", transition: "transform 0.12s" }}>
+                        <polyline points="6 9 12 15 18 9" />
+                      </svg>
+                    </button>
+                    {expanded && group.options.map((option) => {
+                      return (
+                        <SelectorRow
+                          key={`${option.provider}:${option.modelId}`}
+                          active={option.modelId === value?.modelId && option.provider === value?.provider}
+                          onSelect={() => choose(option)}
+                          star={onSetDefault ? {
+                            isDefault: option.modelId === defaultValue?.modelId && option.provider === defaultValue?.provider,
+                            saveLabel: t("chat.saveDefaultModel"),
+                            defaultLabel: t("chat.defaultModel"),
+                            onSave: () => saveDefault(option),
+                          } : undefined}
+                        >
+                          <OptionLabel label={option.name} />
+                        </SelectorRow>
+                      );
+                    })}
+                  </section>
+                );
+              })}
             </div>
           </div>
         );
