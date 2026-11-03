@@ -39,6 +39,7 @@ async function setup() {
   mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
   const sources = [];
   const requests = [];
+  const requestBodies = [];
   // What the lease reply (busy, awaitingInput, subagentsActive) and the session's
   // state read (state) report; tests change it. `answer` turns the lease request
   // into one that never answers (it only ends when aborted), a network failure,
@@ -62,6 +63,7 @@ async function setup() {
     }
   };
   globalThis.fetch = async (requestUrl, init = {}) => {
+    if (typeof init.body === "string") requestBodies.push(JSON.parse(init.body));
     // Status reads (agentStatusUrl()) leave out the system prompt; same route.
     const url = requestUrl === "/api/agent/s1?systemPrompt=0" ? "/api/agent/s1" : requestUrl;
     requests.push(url);
@@ -103,7 +105,7 @@ async function setup() {
   const reads = () => requests.filter((url) => url.startsWith("/api/sessions/s1?")).length;
   const tick = async (ms) => { mock.timers.tick(ms); await settle(); hook.flush(); };
   const read = () => reader?.() ?? null;
-  return { hook, sources, requests, server, open, checks, reads, ends, tick, hide, read };
+  return { hook, sources, requests, requestBodies, server, open, checks, reads, ends, tick, hide, read };
 }
 
 async function teardown(state) {
@@ -306,6 +308,31 @@ test("the return shows a command, a ! command and a compaction the server has un
     assert.equal(state.hook.result.agentPhase?.kind, "running_command");
     assert.equal(state.hook.result.bashRunning, true);
     assert.equal(state.hook.result.isCompacting, true);
+  } finally {
+    await teardown(state);
+  }
+});
+
+test("a dangerous-command extension request is approved without waiting for the user", async () => {
+  const state = await setup();
+  try {
+    await connectIdle(state, { pendingExtensionUiIds: [] });
+    state.open()[0].emit({
+      type: "extension_ui_request",
+      id: "dangerous-1",
+      method: "select",
+      title: "⚠️ Dangerous command:\n\nrm -rf example\n\nAllow?",
+      options: ["Yes", "No"],
+    });
+    await settle();
+    state.hook.flush();
+
+    assert.equal(state.hook.result.extensionDialog, null);
+    assert.ok(state.requestBodies.some((body) => (
+      body?.type === "extension_ui_response"
+      && body.id === "dangerous-1"
+      && body.value === "Yes"
+    )), "the pending request is answered with Yes");
   } finally {
     await teardown(state);
   }

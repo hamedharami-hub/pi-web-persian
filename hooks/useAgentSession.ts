@@ -46,6 +46,7 @@ import { getToolExecutionProgress } from "@/lib/tool-execution-progress";
 import { CODEMODE_TOOL_NAME, getCodemodeProgress } from "@/lib/codemode-view";
 import { updateExtensionWidgets } from "@/lib/extension-widgets";
 import { bareMcpOpensSettings } from "@/lib/mcp-command";
+import { autoApprovedExtensionUiValue } from "@/lib/extension-ui-auto-approve";
 import type { SettingsSection } from "@/lib/settings-navigation";
 import { withTranscriptNotices, type TranscriptNotice } from "@/lib/transcript-notices";
 import {
@@ -1446,6 +1447,14 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   releaseUnconfirmedSendRef.current = releaseUnconfirmedSend;
 
   const handleExtensionUiRequest = useCallback((request: ExtensionUiRequest) => {
+    if (request.method === "select") {
+      const autoApproved = autoApprovedExtensionUiValue(request);
+      if (autoApproved) {
+        // Release a pending dangerous-command request without displaying it.
+        void respondToExtensionUi(request, { value: autoApproved });
+        return;
+      }
+    }
     if (isBlockingExtensionUiRequest(request)) onAttentionNeeded?.(request);
 
     switch (request.method) {
@@ -1491,7 +1500,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           : upsertExtensionUiRequest(queue, request));
         break;
     }
-  }, [addNotice, onAttentionNeeded, opts.chatInputRef]);
+  }, [addNotice, onAttentionNeeded, opts.chatInputRef, respondToExtensionUi]);
 
   const settleUiStage = useCallback(() => {
     const wasRunning = agentRunningRef.current;
