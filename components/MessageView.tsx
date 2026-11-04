@@ -760,6 +760,13 @@ function AssistantMessageView({
     .join("\n");
 
   const stats = message.usage ? formatUsage(message.usage) : [];
+  if (messageDurationMs !== undefined && messageDurationMs > 100 && message.usage?.output && message.usage.output > 0) {
+    const tpsValue = message.usage.output / (messageDurationMs / 1000);
+    if (Number.isFinite(tpsValue) && tpsValue > 0) {
+      if (stats.length > 0) stats.push({ text: "·" });
+      stats.push({ text: `${tpsValue.toFixed(1)} t/s` });
+    }
+  }
   if (turnDurationMs !== undefined) {
     if (stats.length > 0) stats.push({ text: "·" });
     const time = formatTurnDuration(turnDurationMs);
@@ -816,11 +823,12 @@ function AssistantMessageView({
 
       const tokens = estimatedTokensRef.current;
       if (tokens === 0) return;
-      streamStartRef.current ??= streamRateStart(streamRateKeyRef.current, tokens, now);
+      streamStartRef.current ??= streamRateStart(streamRateKeyRef.current, Math.max(0, tokens - 1), now - 550);
       const rate = streamTokensPerSecond(streamStartRef.current, tokens, now);
-      if (rate !== null) setTps(rate);
+      if (rate !== null && rate > 0) setTps(rate);
     };
-    const id = setInterval(tick, 300);
+    tick();
+    const id = setInterval(tick, 250);
     return () => clearInterval(id);
   }, [isStreaming]);
 
@@ -848,6 +856,16 @@ function AssistantMessageView({
         {message.provider && (
           <span>{getModelDisplayName(message.provider, message.model, modelNames)}</span>
         )}
+        {!isStreaming && messageDurationMs !== undefined && messageDurationMs > 100 && message.usage?.output && message.usage.output > 0 && (() => {
+          const completedTps = message.usage.output / (messageDurationMs / 1000);
+          if (!Number.isFinite(completedTps) || completedTps <= 0) return null;
+          const bg = completedTps >= 50 ? "#53b3cb" : completedTps >= 30 ? "#9bc53d" : completedTps >= 15 ? "#f9c22e" : "#e01a4f";
+          return (
+            <span style={{ padding: "1px 6px", borderRadius: 4, background: bg, color: "#fff", fontSize: 10, fontWeight: 500, opacity: 0.9 }}>
+              {completedTps.toFixed(1)} t/s
+            </span>
+          );
+        })()}
         {isStreaming && (() => {
           const est = Math.round(estimatedTokens);
           return (
