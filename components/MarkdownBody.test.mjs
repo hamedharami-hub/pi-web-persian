@@ -406,6 +406,35 @@ test("keeps typed line breaks in tight list items and headings", () => {
   assert.doesNotMatch(renderMarkdown("- alpha\n\n- beta", { keepLineBreaks: true }), /<br/);
 });
 
+test("keeps a custom message's text layout as pi's TUI does", () => {
+  const layout = (markdown) => renderMarkdown(markdown, { keepTextLayout: true });
+
+  assert.match(layout("╭──╮\n│  ACP  │\n╰──╯\nnext"), /<p dir="ltr">╭──╮<br\/>│  ACP  │<br\/>╰──╯<br\/>next<\/p>/);
+  assert.match(layout("Breakdown:\n  Tool   ██  46%\n  Code   █   15%"), /<p dir="ltr">Breakdown:<br\/> {2}Tool {3}██ {2}46%<br\/> {2}Code {3}█ {3}15%<\/p>/);
+  assert.match(layout("متن فارسی\n  خط دوم"), /<p dir="rtl">متن فارسی<br\/> {2}خط دوم<\/p>/);
+  // The first line's indent, and each line's own: more than a code block's four.
+  assert.match(layout("  one\n      two\nthree"), /<p dir="ltr"> {2}one<br\/> {6}two<br\/>three<\/p>/);
+  // Past inline nodes, which split the text and leave its pieces without a position.
+  assert.match(layout("via http://a.test/x\n  next **b**\n  **c**"), /<\/a><br\/> {2}next <strong>b<\/strong><br\/> {2}<strong>c<\/strong><\/p>/);
+  assert.match(layout("*one\n  two*\n  three"), /<em>one<br\/> {2}two<\/em><br\/> {2}three<\/p>/);
+  // A code span across lines moves on by a line with no break to count.
+  assert.match(layout("`a\nb`\n    c\n  d"), />a b<\/code><br\/> {4}c<br\/> {2}d<\/p>/);
+  assert.match(layout("one\r\n  two\r\n    three"), /<p dir="ltr">one<br\/> {2}two<br\/> {4}three<\/p>/);
+  assert.match(layout("a  \n  b\\\n  c"), /<p dir="ltr">a<br\/> {2}b<br\/> {2}c<\/p>/);
+
+  // Markdown still renders, and each paragraph counts its own lines.
+  assert.match(layout("# Title\n\ntext\n\n\n  more\n    lines"), /<h1 dir="ltr">Title<\/h1>\n<p dir="ltr">text<\/p>\n<p dir="ltr"> {2}more<br\/> {4}lines<\/p>/);
+  assert.match(layout("    code\n      block"), /markdown-code-block[\s\S]*> {2}block</);
+  assert.match(layout("<b>hi</b>\nnext"), /&lt;b&gt;hi&lt;\/b&gt;<br\/>next/);
+  // A list's or a quote's own prefix is not an indent.
+  assert.match(layout("- a\n  b\n- c"), /<li dir="ltr">a<br\/>b<\/li>/);
+  assert.match(layout("> a\n>   b"), /<p dir="ltr">a<br\/>b<\/p>/);
+
+  // Other messages stay as they were.
+  assert.match(renderMarkdown("one\n  two", { keepLineBreaks: true }), /<p dir="ltr">one<br\/>two<\/p>/);
+  assert.match(renderMarkdown("one\n  two"), /<p dir="ltr">one\ntwo<\/p>/);
+});
+
 test("renders a hard break once when keeping line breaks", () => {
   // remark-rehype writes an mdast break as <br> plus "\n", which the user
   // bubble's pre-wrap paragraphs would show as a blank line.

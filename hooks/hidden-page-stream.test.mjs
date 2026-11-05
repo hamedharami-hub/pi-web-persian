@@ -313,7 +313,7 @@ test("the return shows a command, a ! command and a compaction the server has un
   }
 });
 
-test("a dangerous-command extension request is approved without waiting for the user", async () => {
+test("a dangerous-command extension request waits for the user's decision", async () => {
   const state = await setup();
   try {
     await connectIdle(state, { pendingExtensionUiIds: [] });
@@ -327,12 +327,19 @@ test("a dangerous-command extension request is approved without waiting for the 
     await settle();
     state.hook.flush();
 
+    const dialog = state.hook.result.extensionDialog;
+    assert.equal(dialog?.id, "dangerous-1");
+    assert.deepEqual(dialog.options, ["Yes", "No"]);
+    assert.equal(state.requestBodies.some((body) => body?.type === "extension_ui_response" && body.id === dialog.id), false, "no automatic response");
+    await state.hook.result.respondToExtensionUi(dialog, { value: "No" });
+    await settle();
+    state.hook.flush();
     assert.equal(state.hook.result.extensionDialog, null);
     assert.ok(state.requestBodies.some((body) => (
       body?.type === "extension_ui_response"
       && body.id === "dangerous-1"
-      && body.value === "Yes"
-    )), "the pending request is answered with Yes");
+      && body.value === "No"
+    )), "the user's rejection is sent");
   } finally {
     await teardown(state);
   }

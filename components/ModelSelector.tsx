@@ -14,10 +14,18 @@ import {
 
 export interface ModelSelectorOption {
   provider: string;
+  /** The provider's display name; falls back to `provider` in the group heading. */
+  providerName?: string;
   modelId: string;
   name: string;
   /** The provider charges no tokens for this model. */
   free?: boolean;
+}
+
+export interface ModelSelectorGroup {
+  provider: string;
+  providerName: string;
+  options: ModelSelectorOption[];
 }
 
 interface ModelSelectorProps {
@@ -41,6 +49,10 @@ interface ModelSelectorProps {
   onSetDefault?: (provider: string, modelId: string) => void;
   /** Shows the multi-select starred-favourites toggle, stored in this browser. */
   enableFavorites?: boolean;
+  /** Every available model, once loaded; listed under "all". */
+  allOptions?: ModelSelectorOption[] | null;
+  /** Set only while `enabledModels` narrows `options`: shows pi's `/model` "scoped | all" row and loads `allOptions`. */
+  onShowAll?: () => void;
 }
 
 const MODEL_FILTER_THRESHOLD = 8;
@@ -50,26 +62,36 @@ export function filterModelOptions(options: ModelSelectorOption[], query: string
   if (!normalizedQuery) return options;
 
   return options.filter((option) => (
-    `${option.name} ${option.modelId} ${option.provider}/${option.modelId}`
+    `${option.name} ${option.provider} ${option.providerName ?? ""} ${option.modelId} ${option.provider}/${option.modelId}`
       .toLocaleLowerCase()
       .includes(normalizedQuery)
   ));
 }
 
-export interface ModelProviderGroup {
-  provider: string;
-  options: ModelSelectorOption[];
-}
-
-/** Groups models without changing either provider order or model order. */
-export function groupModelOptionsByProvider(options: ModelSelectorOption[]): ModelProviderGroup[] {
-  const groups: ModelProviderGroup[] = [];
+/** Groups in first-appearance order; never re-sorts, so a models.json provider keeps its file's order (#783). */
+export function groupModelOptions(options: ModelSelectorOption[]): ModelSelectorGroup[] {
+  const groups: ModelSelectorGroup[] = [];
   for (const option of options) {
-    const group = groups.find((item) => item.provider === option.provider);
-    if (group) group.options.push(option);
-    else groups.push({ provider: option.provider, options: [option] });
+    const existing = groups.find((group) => group.provider === option.provider);
+    if (existing) {
+      existing.options.push(option);
+      if (existing.providerName === existing.provider && option.providerName?.trim()) {
+        existing.providerName = option.providerName.trim();
+      }
+    } else {
+      groups.push({
+        provider: option.provider,
+        providerName: option.providerName?.trim() || option.provider,
+        options: [option],
+      });
+    }
   }
   return groups;
+}
+
+/** Legacy grouping shape for callers that only need provider IDs. */
+export function groupModelOptionsByProvider(options: ModelSelectorOption[]): { provider: string; options: ModelSelectorOption[] }[] {
+  return groupModelOptions(options).map(({ provider, options: groupOptions }) => ({ provider, options: groupOptions }));
 }
 
 /** Keeps only models whose provider charges no tokens. */
@@ -104,6 +126,8 @@ export function ModelSelector({
   defaultValue,
   onSetDefault,
   enableFavorites = true,
+  allOptions,
+  onShowAll,
 }: ModelSelectorProps) {
   const { t } = useI18n();
   const isMobile = useIsMobile();
@@ -112,6 +136,8 @@ export function ModelSelector({
   const [open, setOpen] = useState(false);
   const [anchorRect, setAnchorRect] = useState<{ top: number; right: number; bottom: number; left: number; width: number } | null>(null);
   const [filter, setFilter] = useState("");
+  // Scope and free filtering are independent; free counts follow the current scope.
+  const [showAll, setShowAll] = useState(false);
   const [listView, setListView] = useState<"all" | "free">("all");
   const [openProvider, setOpenProvider] = useState<string | null>(null);
   const locked = disabled || busy;
@@ -142,7 +168,8 @@ export function ModelSelector({
   } : undefined;
   // Options arrive in pi's /model order (orderSelectorModels()); never re-sort
   // them, or a models.json provider loses the order its file gives (#783).
-  const filteredOptions = filterModelOptions(options, filter);
+  const listed = showAll && onShowAll ? allOptions : options;
+  const filteredOptions = filterModelOptions(listed ?? [], filter);
   const favoriteOptions = enableFavorites
     ? favorites
         .map((key) => {
@@ -153,10 +180,10 @@ export function ModelSelector({
         })
         .filter((option): option is ModelSelectorOption => option !== undefined)
     : [];
-  const showFilter = options.length > MODEL_FILTER_THRESHOLD;
-  const freeOptions = filterFreeModelOptions(options);
+  const showFilter = Boolean(onShowAll) || (listed?.length ?? 0) > MODEL_FILTER_THRESHOLD;
+  const freeOptions = filterFreeModelOptions(listed ?? []);
   const visibleOptions = listView === "free" ? filterFreeModelOptions(filteredOptions) : filteredOptions;
-  const modelsByProvider = groupModelOptionsByProvider(visibleOptions);
+  const modelsByProvider = groupModelOptions(visibleOptions);
   const starredOption = onSetDefault && listView === "all"
     ? findStarredModelOption(filteredOptions, defaultValue)
     : undefined;
@@ -165,10 +192,17 @@ export function ModelSelector({
   const favoriteRows = starredOption
     ? favoriteOptions.filter((option) => option.provider !== starredOption.provider || option.modelId !== starredOption.modelId)
     : favoriteOptions;
+  const isListed = (list: ModelSelectorOption[] | null | undefined, ref: { provider: string; modelId: string }) => (
+    list?.find((option) => option.modelId === ref.modelId && option.provider === ref.provider)
+  );
+  const switchScope = () => {
+    if (!showAll) onShowAll?.();
+    setShowAll(!showAll);
+  };
 
   const currentName = selectedLabel ?? (value
-    ? options.find((option) => option.modelId === value.modelId && option.provider === value.provider)?.name ?? value.modelId
-    : emptyLabel ?? (options.length > 0 ? "Select model" : "No models"));
+    ? (isListed(options, value) ?? isListed(allOptions, value))?.name ?? value.modelId
+    : emptyLabel ?? (options.length > 0 ? t("chat.selectModel") : t("chat.noModels")));
 
   useEffect(() => {
     const handleOutsideClick = (event: MouseEvent) => {
@@ -217,8 +251,8 @@ export function ModelSelector({
 
   // A catalog refresh can remove the last free model while the picker is open.
   useEffect(() => {
-    if (listView === "free" && freeOptions.length === 0) setListView("all");
-  }, [freeOptions.length, listView]);
+    if (listed && listView === "free" && freeOptions.length === 0) setListView("all");
+  }, [listed, freeOptions.length, listView]);
 
   const buttonStyle: CSSProperties = variant === "field"
     ? {
@@ -245,7 +279,8 @@ export function ModelSelector({
         gap: 6,
         width: isMobile ? "100%" : undefined,
         maxWidth: isMobile ? "100%" : 220,
-        height: 32,
+        // As tall as ChatInput's other controls: 44px on a phone.
+        height: isMobile ? 44 : 32,
         padding: isMobile ? "8px 10px" : "8px 12px",
         overflow: "hidden",
         border: "none",
@@ -277,7 +312,7 @@ export function ModelSelector({
       key={`${option.provider}:${option.modelId}`}
       active={option.modelId === value?.modelId && option.provider === value?.provider}
       onSelect={() => choose(option)}
-      star={onSetDefault ? {
+      star={onSetDefault && (!showAll || isListed(options, option)) ? {
         isDefault: option.modelId === defaultValue?.modelId && option.provider === defaultValue?.provider,
         saveLabel: t("chat.saveDefaultModel"),
         defaultLabel: t("chat.defaultModel"),
@@ -309,13 +344,14 @@ export function ModelSelector({
         aria-expanded={open}
         aria-busy={busy || undefined}
         disabled={locked}
-        title={busy ? "Switching model" : locked ? currentName : options.length > 0 || onClear ? "Change model" : "No available models"}
+        title={busy ? t("chat.switchingModel") : locked ? currentName : options.length > 0 || onClear ? t("chat.changeModel") : t("chat.noAvailableModels")}
         style={buttonStyle}
         onClick={(event) => {
           const rect = event.currentTarget.getBoundingClientRect();
           setAnchorRect({ top: rect.top, right: rect.right, bottom: rect.bottom, left: rect.left, width: rect.width });
           setOpen((current) => {
             if (current) setFilter("");
+            else setShowAll(false);
             return !current;
           });
         }}
@@ -421,7 +457,7 @@ export function ModelSelector({
                     whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
                   }}
                 >
-                  {t("chat.allModels")} ({options.length})
+                  {t("chat.allModels")} ({listed?.length ?? 0})
                 </button>
                 <button
                   type="button"
@@ -442,11 +478,41 @@ export function ModelSelector({
                 </button>
               </div>
             )}
+            {onShowAll && (
+              <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "6px 8px 0", fontSize: 11 }}>
+                {[false, true].map((all) => (
+                  <button
+                    key={String(all)}
+                    type="button"
+                    aria-pressed={showAll === all}
+                    onClick={() => { if (showAll !== all) switchScope(); }}
+                    style={{
+                      padding: "2px 7px",
+                      border: "1px solid",
+                      borderColor: showAll === all ? "var(--border)" : "transparent",
+                      borderRadius: 4,
+                      background: showAll === all ? "var(--bg-hover)" : "none",
+                      color: showAll === all ? "var(--text)" : "var(--text-muted)",
+                      cursor: "pointer",
+                      fontSize: 11,
+                    }}
+                  >
+                    {t(all ? "chat.modelScopeAll" : "chat.modelScopeScoped")}
+                  </button>
+                ))}
+                {!isMobile && <span style={{ marginLeft: "auto", color: "var(--text-dim)", fontFamily: "var(--font-mono)", fontSize: 10 }}>Tab</span>}
+              </div>
+            )}
             {showFilter && (
               <div style={{ flexShrink: 0, padding: "6px 8px", borderBottom: "1px solid var(--border)" }}>
                 <input
                   value={filter}
                   onChange={(event) => setFilter(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (!onShowAll || event.key !== "Tab") return;
+                    event.preventDefault();
+                    switchScope();
+                  }}
                   placeholder={t("chat.filterModels")}
                   aria-label={t("chat.filterModels")}
                   // On phones, focusing the filter opens the on-screen keyboard,
@@ -472,7 +538,20 @@ export function ModelSelector({
               </div>
             )}
             <div style={{ minHeight: 0, overflowY: "auto" }}>
-              {listView === "free" ? (
+              {onClear && !filter.trim() && (
+                <SelectorRow active={!value} gutter={Boolean(onSetDefault)} onSelect={() => {
+                  setOpen(false);
+                  setFilter("");
+                  onClear();
+                }}>
+                  <OptionLabel label={emptyLabel ?? t("i18n.default")} />
+                </SelectorRow>
+              )}
+              {!listed ? (
+                <div style={{ padding: "8px 12px", color: "var(--text-dim)", fontSize: 12, whiteSpace: "nowrap" }}>
+                  {t("agents.modelsLoading")}
+                </div>
+              ) : listView === "free" ? (
                 visibleOptions.length === 0 ? (
                   <div style={{ padding: "8px 12px", color: "var(--text-dim)", fontSize: 12, whiteSpace: "nowrap" }}>
                     {t("chat.noMatchingModels")}
@@ -493,32 +572,12 @@ export function ModelSelector({
                       <div style={{ padding: "7px 12px 4px", color: "var(--text-dim)", fontSize: 10, fontWeight: 600, textTransform: "uppercase" }}>
                         {t("chat.starredModels")}
                       </div>
-                      <SelectorRow
-                        active={starredOption.modelId === value?.modelId && starredOption.provider === value?.provider}
-                        onSelect={() => choose(starredOption)}
-                        star={{
-                          isDefault: true,
-                          saveLabel: t("chat.saveDefaultModel"),
-                          defaultLabel: t("chat.defaultModel"),
-                          onSave: () => saveDefault(starredOption),
-                        }}
-                      >
-                        <OptionLabel label={starredOption.name} />
-                      </SelectorRow>
+                      {renderModelRow(starredOption)}
                     </section>
-                  )}
-                  {onClear && !filter.trim() && (
-                    <SelectorRow active={!value} gutter={Boolean(onSetDefault)} onSelect={() => {
-                      setOpen(false);
-                      setFilter("");
-                      onClear();
-                    }}>
-                      <OptionLabel label={emptyLabel ?? "Default"} />
-                    </SelectorRow>
                   )}
                   {modelsByProvider.length === 0 ? (
                     <div style={{ padding: "8px 12px", color: "var(--text-dim)", fontSize: 12, whiteSpace: "nowrap" }}>
-                      {filter.trim() ? t("chat.noMatchingModels") : "No available models"}
+                      {filter.trim() ? t("chat.noMatchingModels") : t("chat.noAvailableModels")}
                     </div>
                   ) : modelsByProvider.map((group) => {
                     const expanded = Boolean(filter.trim()) || openProvider === group.provider;
@@ -538,7 +597,7 @@ export function ModelSelector({
                             textAlign: "left", textTransform: "uppercase",
                           }}
                         >
-                          <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{group.provider}</span>
+                          <span title={group.providerName === group.provider ? undefined : group.provider} style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", textTransform: group.providerName === group.provider ? "uppercase" : "none" }}>{group.providerName}</span>
                           <span style={{ marginLeft: "auto", color: "var(--text-dim)", fontSize: 10, fontWeight: 400 }}>{group.options.length}</span>
                           <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ flexShrink: 0, transform: expanded ? "rotate(180deg)" : "none", transition: "transform 0.12s" }}>
                             <polyline points="6 9 12 15 18 9" />

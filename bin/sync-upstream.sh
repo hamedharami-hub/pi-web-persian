@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Rebase the Persian overlay onto upstream pi-web and hand the rewritten branch
-# back to the two-way sync pipeline (backup remote + cron deploy).
+# Rebase the Persian overlay onto upstream pi-web locally and verify it.
+# Never push the rewritten branch automatically.
 #
 #   ./bin/sync-upstream.sh --check                 # fetch and check for conflicts
-#   ./bin/sync-upstream.sh --apply [ref]           # rebase, verify, force-push to backup
-#   ./bin/sync-upstream.sh --apply ref --no-push   # rebase and verify only
+#   ./bin/sync-upstream.sh --apply [ref]           # rebase and verify locally
+#   ./bin/sync-upstream.sh --apply ref --no-push   # same (legacy option)
 #
 # Upstream remote is reused when one already points at agegr/pi-web (this repo's
 # `origin`), so no duplicate remote is created. Local edits are committed by
@@ -13,16 +13,19 @@
 set -euo pipefail
 
 UPSTREAM_URL="https://github.com/agegr/pi-web.git"
-BACKUP_REMOTE="backup"
-BACKUP_BRANCH="main"
-
 MODE="${1:---check}"
-TARGET_REF="${2:-}"
-PUSH=1
-if [ "$TARGET_REF" = "--no-push" ]; then
-  TARGET_REF="${3:-}"
-  PUSH=0
-fi
+[ "$#" -eq 0 ] || shift
+TARGET_REF=""
+NO_PUSH_SEEN=0
+usage() { echo "Usage: $0 [--check | --apply] [target-ref] [--no-push]" >&2; exit 1; }
+case "$MODE" in --check|--apply) ;; *) usage ;; esac
+for arg in "$@"; do
+  case "$arg" in
+    --no-push) [ "$NO_PUSH_SEEN" = 0 ] || usage; NO_PUSH_SEEN=1 ;;
+    -*) usage ;;
+    *) [ -z "$TARGET_REF" ] || usage; TARGET_REF="$arg" ;;
+  esac
+done
 
 cd "$(git rev-parse --show-toplevel 2>/dev/null)" || { echo "Error: not inside the pi-web repository." >&2; exit 1; }
 
@@ -52,25 +55,35 @@ fi
 
 echo "Fetching $upstream_remote ..."
 git fetch "$upstream_remote" --tags --prune
-if ! git rev-parse --verify -q "$TARGET_REF" >/dev/null 2>&1; then
+# A tag-only fetch refspec can leave an existing remote-tracking main stale.
+# Refresh it explicitly even when the ref already resolves.
+if [ "$TARGET_REF" = "$upstream_remote/main" ] || [ "$TARGET_REF" = "refs/remotes/$upstream_remote/main" ]; then
+  git fetch "$upstream_remote" "+refs/heads/main:refs/remotes/$upstream_remote/main"
+fi
+if ! git rev-parse --verify -q "${TARGET_REF}^{commit}" >/dev/null 2>&1; then
   # A partial or single-tag clone has no branch refspec yet; fetch the upstream
   # branches so the default target resolves.
   echo "Resolving $TARGET_REF ..."
   git fetch "$upstream_remote" "+refs/heads/*:refs/remotes/$upstream_remote/*"
 fi
 
-base="$(git merge-base HEAD "$TARGET_REF")"
-target="$(git rev-parse "$TARGET_REF")"
+target="$(git rev-parse --verify "${TARGET_REF}^{commit}")"
+base="$(git merge-base HEAD "$target")"
 if [ "$base" = "$target" ]; then
   echo "Already up to date with $TARGET_REF ($target)."
+  if [ "$MODE" = "--check" ]; then exit 0; fi
+  echo "Verifying the current branch (including any previous rebase) ..."
+  NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=1536}" npx tsc --noEmit
+  node --experimental-strip-types --test lib/text-direction.test.mjs lib/perf-cache.test.mjs
+  echo "Verification passed; no push performed."
   exit 0
 fi
 
 echo "New upstream commits in $TARGET_REF:"
-git log --oneline -n 20 "$base..$TARGET_REF"
+git log --oneline -n 20 "$base..$target"
 
 conflict=0
-git merge-tree --write-tree HEAD "$TARGET_REF" >/dev/null 2>&1 || conflict=1
+git merge-tree --write-tree HEAD "$target" >/dev/null 2>&1 || conflict=1
 if [ "$conflict" = 1 ]; then
   echo "Warning: git merge-tree reports a conflict against $TARGET_REF." >&2
   [ "$MODE" = "--check" ] && exit 2
@@ -80,14 +93,20 @@ if [ "$MODE" = "--check" ]; then
   echo "Dry run complete. Apply with: $0 --apply $TARGET_REF"
   exit 0
 fi
-[ "$MODE" = "--apply" ] || fail "usage: $0 [--check | --apply] [target-ref] [--no-push]"
-
 branch="$(git rev-parse --abbrev-ref HEAD)"
-safety="backup/pre-upstream-$(date +%Y%m%d-%H%M%S)"
-git branch "$safety" HEAD
+safety_base="backup/pre-upstream-$(date +%Y%m%d-%H%M%S)"
+safety="$safety_base"
+suffix=0
+# Branch creation is atomic: never overwrite an existing backup, even if
+# another invocation chooses the same name between the check and creation.
+while ! git branch "$safety" HEAD 2>/dev/null; do
+  git show-ref --verify --quiet "refs/heads/$safety" || fail "could not create safety branch '$safety'"
+  suffix=$((suffix + 1))
+  safety="${safety_base}-${suffix}"
+done
 echo "Safety branch: $safety"
 
-if ! git rebase "$TARGET_REF"; then
+if ! git rebase "$target"; then
   git rebase --abort || true
   echo "Rebase conflicted and was aborted; '$branch' is unchanged ($(git rev-parse --short HEAD))." >&2
   exit 1
@@ -97,19 +116,6 @@ echo "Rebased onto $TARGET_REF; verifying ..."
 NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=1536}" npx tsc --noEmit
 node --experimental-strip-types --test lib/text-direction.test.mjs lib/perf-cache.test.mjs
 
-if [ "$PUSH" = 1 ]; then
-  git fetch "$BACKUP_REMOTE" "$BACKUP_BRANCH"
-  echo "Force-pushing rewritten $branch to $BACKUP_REMOTE/$BACKUP_BRANCH (lease-protected) ..."
-  if git push --force-with-lease="$BACKUP_BRANCH" "$BACKUP_REMOTE" "HEAD:$BACKUP_BRANCH"; then
-    echo "Pushed. The auto-sync will build and deploy at the next idle window;"
-    echo "to apply immediately: /home/ubuntu/.config/pi-web/sync.sh --deploy-now"
-  else
-    echo "Push was rejected (someone else moved $BACKUP_REMOTE/$BACKUP_BRANCH)." >&2
-    echo "Nothing was forced; reconcile, then rerun or delete $safety when done." >&2
-    exit 1
-  fi
-else
-  echo "Skipped the push (--no-push). The local branch is rebased and verified."
-fi
+echo "The local branch is rebased and verified; no push was performed."
 
 echo "Done. Keep or delete the safety branch: $safety"

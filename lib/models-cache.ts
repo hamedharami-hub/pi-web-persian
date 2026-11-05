@@ -4,6 +4,7 @@ export interface ModelsData {
     id: string;
     name: string;
     provider: string;
+    providerName: string;
     input?: string[];
     free?: boolean;
     /** Dollars per 1M tokens, as the provider catalog lists them. */
@@ -21,6 +22,8 @@ export interface ModelsData {
   modelError?: string;
   /** Warnings from resolving the `enabledModels` scope (e.g. a pattern matched nothing). */
   modelScopeWarnings?: string[];
+  /** True when enabledModels is active and restricting the model list. */
+  isScoped?: boolean;
 }
 
 interface ModelsCacheState {

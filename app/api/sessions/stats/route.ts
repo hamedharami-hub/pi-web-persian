@@ -4,7 +4,8 @@ import { getRpcSession } from "@/lib/rpc-manager";
 import { getSessionSettings, openSessionManager, resolveSessionPath } from "@/lib/session-reader";
 import { getCachedSessionStats } from "@/lib/perf-cache";
 import { type SessionUsageSummary } from "@/lib/session-stats";
-import { computeLiveSessionTotalActiveMs } from "@/lib/session-timing";
+import { computeLiveSessionTotalActiveMs, computeSessionTotalActiveMs } from "@/lib/session-timing";
+import { sideOwnEntries } from "@/lib/side-session";
 import { SESSION_ID_PATTERN } from "@/lib/session-ui-state-shared";
 import type { SessionEntry } from "@/lib/types";
 
@@ -50,12 +51,13 @@ async function readSummary(id: string): Promise<SessionUsageSummary | null> {
   const cached = summaries.get(sm);
   if (cached && cached.entryCount === entries.length && cached.lastEntryId === lastEntryId && cached.leafId === leafId) return cached.summary;
 
-  const stats = getCachedSessionStats(sm, entries as unknown as SessionEntry[]);
+  const ownEntries = sideOwnEntries(entries);
+  const stats = getCachedSessionStats(sm, ownEntries as unknown as SessionEntry[]);
   const summary: SessionUsageSummary = {
     tokens: stats.tokens,
     cost: stats.cost,
     toolCalls: stats.toolCalls,
-    totalActiveMs: computeLiveSessionTotalActiveMs(sm),
+    totalActiveMs: ownEntries === entries ? computeLiveSessionTotalActiveMs(sm) : computeSessionTotalActiveMs(ownEntries),
     ...getSessionSettings(entries as unknown as SessionEntry[], leafId),
   };
   summaries.set(sm, { entryCount: entries.length, lastEntryId, leafId, summary });
