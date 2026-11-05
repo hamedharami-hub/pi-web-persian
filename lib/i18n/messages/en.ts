@@ -797,6 +797,8 @@ export const enLocale: LocalePlugin = {
     "chat.allModels": "All models",
     "chat.freeModels": "Free models",
     "chat.saveDefaultModel": "Use and save as default for new chats",
+    "chat.starModel": "Star model for quick access",
+    "chat.unstarModel": "Remove model from starred",
     "chat.defaultModel": "Default model for new chats",
     "chat.saveDefaultThinking": "Use and save as default reasoning level",
     "chat.defaultThinking": "Default reasoning level for new chats",

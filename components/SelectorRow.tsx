@@ -22,6 +22,17 @@ export interface SelectorRowStar {
 }
 
 /**
+ * A starred-favourites toggle, separate from the single default-model star:
+ * any number of rows can hold it at once.
+ */
+export interface SelectorRowFavorite {
+  isFavorite: boolean;
+  addLabel: string;
+  removeLabel: string;
+  onToggle: () => void;
+}
+
+/**
  * A selector menu row styled like a session-list row: the whole row selects
  * and highlights on hover. With `star`, the right gutter holds the default
  * marker: a small static star on the default row, and on every other row a
@@ -32,16 +43,19 @@ export function SelectorRow({
   active,
   onSelect,
   star,
-  gutter = Boolean(star),
+  favorite,
+  gutter = Boolean(star || favorite),
   children,
 }: {
   active: boolean;
   onSelect: () => void;
   star?: SelectorRowStar;
+  favorite?: SelectorRowFavorite;
   /** Keep room for the star so it never covers the row's text; pass it to every row of a menu that has stars so they line up. */
   gutter?: boolean;
   children: ReactNode;
 }) {
+  const gutterWidth = star && favorite ? 64 : star || favorite || gutter ? 36 : 12;
   const isMobile = useIsMobile();
   const [hovered, setHovered] = useState(false);
   const [focused, setFocused] = useState(false);
@@ -69,7 +83,7 @@ export function SelectorRow({
         onClick={onSelect}
         style={{
           display: "flex", alignItems: "center", gap: 8,
-          width: "100%", minWidth: 0, padding: gutter ? "7px 36px 7px 12px" : "7px 12px",
+          width: "100%", minWidth: 0, padding: gutter ? `7px ${gutterWidth}px 7px 12px` : "7px 12px",
           border: "none", background: "none",
           color: active ? "var(--text)" : "var(--text-muted)",
           cursor: "pointer", fontSize: 12, fontWeight: active ? 600 : 400,
@@ -129,6 +143,38 @@ export function SelectorRow({
           }}
         >
           <StarIcon filled={false} size={12} />
+        </button>
+      )}
+      {favorite && (
+        <button
+          type="button"
+          title={favorite.isFavorite ? favorite.removeLabel : favorite.addLabel}
+          aria-label={favorite.isFavorite ? favorite.removeLabel : favorite.addLabel}
+          aria-pressed={favorite.isFavorite}
+          onClick={(event) => {
+            event.stopPropagation();
+            favorite.onToggle();
+          }}
+          style={{
+            position: "absolute", top: "50%", transform: "translateY(-50%)",
+            right: star ? 32 : 6,
+            display: "flex", alignItems: "center", justifyContent: "center",
+            width: 24, height: 24, padding: 0,
+            background: "none", border: "none",
+            color: favorite.isFavorite ? "var(--accent)" : "var(--text-dim)",
+            cursor: "pointer", opacity: favorite.isFavorite ? 1 : 0.55,
+            transition: "opacity 0.1s, color 0.12s",
+          }}
+          onMouseEnter={(event) => {
+            event.currentTarget.style.opacity = "1";
+            event.currentTarget.style.color = favorite.isFavorite ? "var(--accent)" : "var(--text)";
+          }}
+          onMouseLeave={(event) => {
+            event.currentTarget.style.opacity = favorite.isFavorite ? "1" : "0.55";
+            event.currentTarget.style.color = favorite.isFavorite ? "var(--accent)" : "var(--text-dim)";
+          }}
+        >
+          <StarIcon filled={favorite.isFavorite} size={12} />
         </button>
       )}
     </div>

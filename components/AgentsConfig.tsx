@@ -42,6 +42,62 @@ import { projectTrustReloadKey } from "./settings-ui-helpers";
 const TOOL_OPTIONS = ["read", "bash", "edit", "write", "grep", "find", "ls"];
 const THINKING_OPTIONS = ["", "off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 
+/**
+ * What each shipped profile is for, which model class suits it, and how its
+ * tokens are billed. Shown behind the "?" button so an empty model field
+ * (inherit the parent's model) is a deliberate choice rather than a guess.
+ */
+interface ProfileGuidance {
+  summary: string;
+  /** Model classes to prefer, cheapest first. */
+  recommended: string;
+  /** `provider/modelId` hints the panel looks up in the loaded catalog. */
+  suggestions: string[];
+  costNote: string;
+}
+
+const PROFILE_GUIDANCE: Record<string, ProfileGuidance> = {
+  explore: {
+    summary: "Searches the codebase and reports paths, symbols and line numbers. Read-only: read, grep, find, ls. Uses a short replacement prompt, so it stays cheap.",
+    recommended: "A fast, small-context model (flash/haiku class) with thinking low or off.",
+    suggestions: ["antigravity/gemini-3.8-flash", "openrouter/anthropic/claude-haiku-5.5", "inception/mercury-3"],
+    costNote: "Searching is many small calls: the cheapest capable model usually wins here.",
+  },
+  plan: {
+    summary: "Inspects the repository and writes an implementation-ready plan: steps, dependencies, risks and how to verify. Never edits files.",
+    recommended: "A strong reasoning model with thinking medium or high.",
+    suggestions: ["antigravity/claude-sonnet-5-5", "openrouter/anthropic/claude-sonnet-5.5", "openai-codex/gpt-6.1-terra"],
+    costNote: "One long planning answer, so a costly model is affordable; it saves far more downstream.",
+  },
+  "general-purpose": {
+    summary: "Does the actual work: reads, edits, runs shell commands and tests. Loads the safe-ops and verify-first skills plus the protected-paths and permission-gate extensions.",
+    recommended: "The parent's model, or a strong general model with thinking medium.",
+    suggestions: ["antigravity/claude-sonnet-5-5", "openrouter/openai/gpt-6.1-terra", "openai-codex/gpt-6.1-sol"],
+    costNote: "Highest token volume of all profiles: file reads, patches and test output. Watch max turns.",
+  },
+  reviewer: {
+    summary: "Reviews the diff and the changed files for real defects, security issues, error handling and regressions. Reports file:line, severity and a verdict.",
+    recommended: "A different model family from the one that wrote the code, thinking high.",
+    suggestions: ["antigravity/claude-opus-5-5", "openrouter/openai/gpt-6.1-terra-pro", "openai-codex/gpt-6.1-terra"],
+    costNote: "Reads whole files once, so cost stays moderate while catching blind spots of the author model.",
+  },
+  researcher: {
+    summary: "Researches the web, GitHub and docs and extracts PDF/Word/Excel/PowerPoint content with the agent-reach and doc-tools skills. Never edits code.",
+    recommended: "A fast model with a large context window, thinking low.",
+    suggestions: ["antigravity/gemini-3.8-flash", "openrouter/google/gemini-4-argon", "openrouter/openai/gpt-6.1-terra"],
+    costNote: "Long page and document text fills the context: prefer a large-window cheap model.",
+  },
+};
+
+function formatModelCost(cost: { input: number; output: number } | undefined, free: boolean | undefined): string {
+  if (cost) {
+    const fmt = (value: number) => `$${(Math.round(value * 1000) / 1000).toFixed(3)}`;
+    return `${fmt(cost.input)} in / ${fmt(cost.output)} out per 1M tokens`;
+  }
+  if (free) return "Free (no token charge reported)";
+  return "No price listed for this model";
+}
+
 type EditableProfile = Omit<SubagentProfile, "scope" | "filePath">;
 type EditorMode = "view" | "edit" | "create";
 
@@ -94,6 +150,7 @@ function editableProfile(profile: SubagentProfile): EditableProfile {
     mcp: profile.mcp ?? "off",
     ...(profile.extensions !== undefined ? { extensions: [...profile.extensions] } : {}),
     promptMode: profile.promptMode,
+    ...(profile.isolation ? { isolation: profile.isolation } : {}),
     ...(profile.model ? { model: profile.model } : {}),
     ...(profile.thinking ? { thinking: profile.thinking } : {}),
     ...(profile.maxTurns ? { maxTurns: profile.maxTurns } : {}),
@@ -198,6 +255,7 @@ export function AgentsConfig({
   const [settingsError, setSettingsError] = useState<string | null>(null);
   const [reloadNeeded, setReloadNeeded] = useState(false);
   const [reloading, setReloading] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
 
   const selected = useMemo(
     () => profiles.find((profile) => profileKey(profile) === selectedKey) ?? null,
@@ -329,6 +387,19 @@ export function AgentsConfig({
     });
     setMode("create");
     setTargetScope(isWritableScope(selected.scope) ? selected.scope : "global");
+    setError(null);
+  };
+
+  const beginCustomize = () => {
+    if (!selected) return;
+    setSelectedKey(null);
+    setDraft({
+      ...editableProfile(selected),
+      name: selected.name,
+      displayName: selected.displayName,
+    });
+    setMode("create");
+    setTargetScope("global");
     setError(null);
   };
 
@@ -544,6 +615,24 @@ export function AgentsConfig({
                         >
                           <ConfigStatusDot active={profile.enabled} />
                           <ConfigSidebarText className={`is-grow${profile.enabled ? "" : " is-muted"}`}>{profile.displayName}</ConfigSidebarText>
+                          <button
+                            type="button"
+                            className="agents-help-button"
+                            aria-label={`About ${profile.displayName}`}
+                            title={`About ${profile.displayName}`}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              selectProfile(profile);
+                              setHelpOpen(true);
+                            }}
+                          >
+                            ?
+                          </button>
+                          {!overridden && (profile.model || profile.thinking) && (
+                            <span style={{ fontSize: 10, color: "var(--text-dim)", maxWidth: 110, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={[profile.model, profile.thinking].filter(Boolean).join(" · ")}>
+                              {[profile.model?.split("/").pop(), profile.thinking].filter(Boolean).join(" · ")}
+                            </span>
+                          )}
                           {overridden && <span className="agents-overridden-label">{t("agents.overridden")}</span>}
                         </ConfigSidebarItem>
                       );
@@ -567,6 +656,16 @@ export function AgentsConfig({
               ) : (
                 <ConfigDetailStack>
                   <ConfigDetailHeader>
+                    <button
+                      type="button"
+                      className="agents-help-button is-inline"
+                      aria-expanded={helpOpen}
+                      aria-label="What this profile does"
+                      title="What this profile does, which model suits it, and its cost"
+                      onClick={() => setHelpOpen((current) => !current)}
+                    >
+                      ?
+                    </button>
                     <ConfigDetailHeaderInfo>
                       {/* A new profile chooses its scope where a saved one shows it. */}
                       {creating ? (
@@ -593,11 +692,39 @@ export function AgentsConfig({
                       )}
                     </ConfigDetailHeaderInfo>
                     <ConfigDetailActions>
+                      {selected && mode === "view" && <ConfigButton size="small" onClick={beginCustomize} disabled={saving || toggling}>Customize</ConfigButton>}
                       {selected && (mode === "view" || mode === "edit") && <ConfigButton size="small" onClick={beginDuplicate} disabled={saving || toggling}>{t("agents.duplicate")}</ConfigButton>}
                       {selected && isWritableScope(selected.scope) && mode === "edit" && <ConfigButton variant="danger" size="small" onClick={() => void remove()} disabled={saving || toggling}>{t("agents.delete")}</ConfigButton>}
                       <ConfigSwitch checked={draft.enabled} disabled={switchDisabled} label={draft.enabled ? t("agents.disable") : t("agents.enable")} onChange={(checked) => void toggleEnabled(checked)} />
                     </ConfigDetailActions>
                   </ConfigDetailHeader>
+
+                  {helpOpen && (() => {
+                    const guidance = PROFILE_GUIDANCE[draft.name.trim().toLowerCase()];
+                    const activeModel = modelOptions.find((model) => `${model.provider}/${model.id}` === draftModelBase);
+                    const suggestions = (guidance?.suggestions ?? [])
+                      .map((reference) => {
+                        const separator = reference.indexOf("/");
+                        const provider = reference.slice(0, separator);
+                        const modelId = reference.slice(separator + 1);
+                        return modelOptions.find((model) => model.provider === provider && model.id === modelId);
+                      })
+                      .filter((model): model is NonNullable<typeof model> => model !== undefined);
+                    return (
+                      <div className="agents-help-panel" role="note">
+                        <div className="agents-help-panel-head">
+                          <strong>{guidance ? `About ${draft.displayName}` : "About this profile"}</strong>
+                          <button type="button" className="agents-help-panel-close" aria-label="Close help" onClick={() => setHelpOpen(false)}>×</button>
+                        </div>
+                        <p>{guidance?.summary ?? (draft.systemPrompt.trim() || draft.description || "No instructions yet. Describe what this sub-agent should do, and it is appended to (or replaces) the base prompt.")}</p>
+                        <p><strong>Suggested model:</strong> {guidance?.recommended ?? "Pick the model the parent uses, or the cheapest one that can do the job."} <strong>Currently:</strong> {draftModelBase ? `${draftModelBase} (${formatModelCost(activeModel?.cost, activeModel?.free)})` : "inherits the parent session's model and thinking level"}.</p>
+                        {suggestions.length > 0 && (
+                          <p><strong>Available matches:</strong> {suggestions.map((model) => `${model.name} — ${formatModelCost(model.cost, model.free)}`).join(" · ")}</p>
+                        )}
+                        <p className="agents-help-panel-note">{guidance?.costNote ?? "Token cost follows the selected model; leaving the model empty costs the same as the parent session."} Thinking level changes reasoning tokens only where the model supports it. If a child runs out of tokens or credits mid-run, Pi Web retries it once on the parent session model.</p>
+                      </div>
+                    );
+                  })()}
 
                   <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "minmax(0, 1fr) minmax(0, 1fr)", gap: 12 }}>
                     <Field label={t("agents.name")}>
@@ -661,24 +788,48 @@ export function AgentsConfig({
                     )}
                   </Field>
 
-                  <Field label={t("agents.codemode")}>
-                    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr)", gap: 12 }}>
+                    <Field label={t("agents.codemode")}>
                       <select
                         aria-label={t("agents.codemode")}
                         value={draft.codemode ?? "off"}
                         disabled={disabled}
                         onChange={(event) => update("codemode", event.target.value as EditableProfile["codemode"])}
-                        style={{ ...controlStyle, width: "auto", minWidth: 180, alignSelf: "flex-start" }}
+                        style={controlStyle}
                       >
                         <option value="inherit">{t("agents.codemode.inherit")}</option>
                         <option value="on">{t("agents.codemode.on")}</option>
                         <option value="off">{t("agents.codemode.off")}</option>
                       </select>
-                      <span style={{ color: "var(--text-dim)", fontSize: 11, lineHeight: 1.4 }}>
-                        {t("agents.codemodeHint")}
-                      </span>
-                    </div>
-                  </Field>
+                    </Field>
+                    <Field label="Prompt mode">
+                      <select
+                        aria-label="Prompt mode"
+                        value={draft.promptMode ?? "append"}
+                        disabled={disabled}
+                        onChange={(event) => update("promptMode", event.target.value as EditableProfile["promptMode"])}
+                        style={controlStyle}
+                      >
+                        <option value="append">Append to base prompt</option>
+                        <option value="replace">Replace base prompt</option>
+                      </select>
+                    </Field>
+                    <Field label="Isolation">
+                      <select
+                        aria-label="Isolation"
+                        value={draft.isolation ?? "off"}
+                        disabled={disabled}
+                        onChange={(event) => update("isolation", (event.target.value === "worktree" ? "worktree" : undefined) as EditableProfile["isolation"])}
+                        style={controlStyle}
+                      >
+                        <option value="off">Shared workspace</option>
+                        <option value="worktree">Isolated git worktree</option>
+                      </select>
+                    </Field>
+                  </div>
+                  <span style={{ color: "var(--text-dim)", fontSize: 11, lineHeight: 1.4, marginTop: -6 }}>
+                    {t("agents.codemodeHint")}
+                  </span>
 
                   <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "minmax(0, 1.5fr) minmax(120px, 0.75fr) minmax(100px, 0.5fr)", gap: 12 }}>
                     <Field label={t("agents.model")}>

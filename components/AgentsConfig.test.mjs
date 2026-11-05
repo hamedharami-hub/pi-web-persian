@@ -45,6 +45,10 @@ test("draft backfills code mode for legacy profiles and keeps an explicit choice
     const draft = editable({ name: "reviewer", tools: [], loadSkills: false, loadExtensions: false, codemode });
     assert.equal(draft.codemode, codemode);
   }
+  for (const isolation of ["worktree", "off"]) {
+    const draft = editable({ name: "reviewer", tools: [], loadSkills: false, loadExtensions: false, isolation });
+    assert.equal(draft.isolation, isolation);
+  }
 });
 
 test("a profile model's pi :level suffix names its base model; a listed colon id matches whole", () => {

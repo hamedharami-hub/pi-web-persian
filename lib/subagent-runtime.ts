@@ -35,6 +35,11 @@ import {
 import type { SessionEntry } from "./types";
 import type { DebugParentNotification, DebugSubagentRun } from "./debug-types";
 import { buildSubagentPromptPlan } from "./subagent-prompt";
+import {
+  MODEL_FALLBACK_INSTRUCTION,
+  modelFallbackNote,
+  shouldFallbackToParentModel,
+} from "./subagent-model-fallback";
 import { createSubagentSkillsBinding } from "./subagent-skills";
 import { appendSubagentInputFiles, loadSubagentInputFiles, subagentInputLimits } from "./subagent-input";
 import { projectTrustReloadOptions } from "./project-trust";
@@ -717,19 +722,53 @@ export function createSubagentController(
           };
         }
         let result: SubagentRunInfo;
+        // A run that ran out of tokens, credits or context continues once on the
+        // parent session's model, instead of failing with nothing to show.
+        const parentModel = parent.inner.model as ReturnType<ModelRuntime["getModel"]>;
+        const childModel = (callModel ?? profileModel)?.model ?? parentModel;
+        let modelFallbackUsed = false;
+        const fallbackToParentModel = async (reason: string | undefined): Promise<boolean> => {
+          if (modelFallbackUsed || stored.abortRequested || request.signal?.aborted) return false;
+          if (!shouldFallbackToParentModel({ error: reason, childModel, parentModel })) return false;
+          modelFallbackUsed = true;
+          try {
+            await inner.setModel(parentModel!);
+            await inner.prompt(MODEL_FALLBACK_INSTRUCTION, { source: "rpc" });
+            return true;
+          } catch (error) {
+            console.error(
+              "[pi-web] subagent model fallback failed:",
+              error instanceof Error ? error.message : error,
+            );
+            return false;
+          }
+        };
+        const fallbackNote = () => modelFallbackUsed
+          ? modelFallbackNote(childModel ? `${childModel.provider}/${childModel.id}` : undefined, parentModel)
+          : undefined;
         try {
           await prepareChildMcp(childSession, stored);
-          await inner.prompt(delegatedTask, { source: "rpc" });
+          try {
+            await inner.prompt(delegatedTask, { source: "rpc" });
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            if (!(await fallbackToParentModel(message))) throw error;
+          }
+          let stop = stored.abortRequested ? undefined : lastAssistantStop(sessionManager);
+          // pi can record a provider failure on the assistant message and resolve anyway.
+          if (stop?.error && !stop.aborted && await fallbackToParentModel(stop.error)) {
+            stop = stored.abortRequested ? undefined : lastAssistantStop(sessionManager);
+          }
           const text = inner.getLastAssistantText()?.trim();
-          const stop = stored.abortRequested ? undefined : lastAssistantStop(sessionManager);
           const aborted = stored.abortRequested || stop?.aborted === true;
           const errorMessage = aborted ? undefined : stop?.error ??
             (maxTurnsReached && turnLimit ? turnLimitError(turnLimit, undelivered) : undefined);
+          const note = errorMessage || aborted ? undefined : fallbackNote();
           result = {
             ...initialRun,
             status: aborted ? "aborted" : errorMessage ? "failed" : "completed",
             completedAt: new Date().toISOString(),
-            ...(text ? { result: text } : {}),
+            ...(text || note ? { result: [text, note].filter(Boolean).join("\n\n") } : {}),
             ...(errorMessage ? { error: errorMessage } : {}),
           };
         } catch (error) {

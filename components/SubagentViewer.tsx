@@ -55,6 +55,10 @@ export function SubagentViewer({ sessionId, fallbackLabel, running, onOpenFile }
   const [notFound, setNotFound] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [runtimeMeta, setRuntimeMeta] = useState<{ model?: { provider: string; modelId: string } | null; thinkingLevel?: string }>({});
+  const [steerInput, setSteerInput] = useState("");
+  const [controlBusy, setControlBusy] = useState(false);
+  const [controlError, setControlError] = useState<string | null>(null);
 
   // Session info on open, when the run starts or ends (the persisted status
   // takes over from the live flag), and on manual refresh: label, cwd, status.
@@ -96,10 +100,13 @@ export function SubagentViewer({ sessionId, fallbackLabel, running, onOpenFile }
           return;
         }
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json() as { context: Partial<SubagentTranscript> };
+        const data = await res.json() as { context: Partial<SubagentTranscript> & { model?: { provider: string; modelId: string } | null; thinkingLevel?: string } };
         if (cancelled) return;
         setNotFound(false);
         setError(null);
+        if (data.context?.model !== undefined || data.context?.thinkingLevel !== undefined) {
+          setRuntimeMeta({ model: data.context.model, thinkingLevel: data.context.thinkingLevel });
+        }
         setTranscript((current) => mergeTailPage(current, toTranscript(data.context)));
       } catch (err) {
         if (!cancelled && !(err instanceof Error && err.name === "AbortError")) {
@@ -179,6 +186,58 @@ export function SubagentViewer({ sessionId, fallbackLabel, running, onOpenFile }
   const toolResults = useMemo(() => buildToolResultsMap(messages), [messages]);
   const relation = info?.relation?.kind === "subagent" ? info.relation : null;
   const status = running ? "running" as const : relation?.status ?? "completed" as const;
+  const metaSummary = [
+    relation?.profile,
+    runtimeMeta.model?.modelId,
+    runtimeMeta.thinkingLevel && runtimeMeta.thinkingLevel !== "off" ? runtimeMeta.thinkingLevel : undefined,
+  ].filter(Boolean).join(" · ");
+  const metaTitle = [
+    relation?.profile,
+    runtimeMeta.model ? `${runtimeMeta.model.provider}/${runtimeMeta.model.modelId}` : undefined,
+    runtimeMeta.thinkingLevel && runtimeMeta.thinkingLevel !== "off" ? runtimeMeta.thinkingLevel : undefined,
+  ].filter(Boolean).join(" · ");
+
+  const sendSteer = async () => {
+    const message = steerInput.trim();
+    if (!message || controlBusy) return;
+    setControlBusy(true);
+    setControlError(null);
+    try {
+      const res = await fetch(`/api/subagents/${encodeURIComponent(sessionId)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "steer", message }),
+      });
+      const data = await res.json().catch(() => ({})) as { error?: string };
+      if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
+      setSteerInput("");
+      setRefreshKey((key) => key + 1);
+    } catch (err) {
+      setControlError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setControlBusy(false);
+    }
+  };
+
+  const abortRun = async () => {
+    if (controlBusy) return;
+    setControlBusy(true);
+    setControlError(null);
+    try {
+      const res = await fetch(`/api/subagents/${encodeURIComponent(sessionId)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "abort" }),
+      });
+      const data = await res.json().catch(() => ({})) as { error?: string };
+      if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
+      setRefreshKey((key) => key + 1);
+    } catch (err) {
+      setControlError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setControlBusy(false);
+    }
+  };
 
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column", minWidth: 0 }}>
@@ -199,12 +258,22 @@ export function SubagentViewer({ sessionId, fallbackLabel, running, onOpenFile }
             <rect x="5" y="7" width="14" height="11" rx="2" /><path d="M9 11h.01M15 11h.01M9 15h6M12 7V4M10 4h4" />
           </svg>
         </span>
-        <strong
-          style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12, fontWeight: 600 }}
-          title={relation ? `${relation.profile ?? t("agentSwitcher.subagent")} · ${label}` : label}
-        >
-          {label}
-        </strong>
+        <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
+          <strong
+            style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12, fontWeight: 600 }}
+            title={relation ? `${relation.profile ?? t("agentSwitcher.subagent")} · ${label}` : label}
+          >
+            {label}
+          </strong>
+          {metaSummary && (
+            <span
+              style={{ fontSize: 10, color: "var(--text-dim)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+              title={metaTitle}
+            >
+              {metaSummary}
+            </span>
+          )}
+        </div>
         <span
           style={{ display: "flex", alignItems: "center", gap: 5, color: statusColor(status), fontSize: 11, whiteSpace: "nowrap", flexShrink: 0 }}
           title={relation?.description}
@@ -283,6 +352,44 @@ export function SubagentViewer({ sessionId, fallbackLabel, running, onOpenFile }
           </>
         )}
       </div>
+      {status === "running" && (
+        <div style={{ borderTop: "1px solid var(--border)", background: "var(--bg-panel)", padding: "6px 10px", display: "flex", flexDirection: "column", gap: 4, flexShrink: 0 }}>
+          {controlError && <span role="alert" style={{ color: "#dc2626", fontSize: 11 }}>{controlError}</span>}
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <input
+              type="text"
+              value={steerInput}
+              disabled={controlBusy}
+              placeholder="Steer running sub-agent..."
+              aria-label="Steer running sub-agent"
+              onChange={(event) => setSteerInput(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && !event.shiftKey) {
+                  event.preventDefault();
+                  void sendSteer();
+                }
+              }}
+              style={{ flex: 1, minWidth: 0, height: 28, padding: "0 8px", fontSize: 12, borderRadius: 5, border: "1px solid var(--border)", background: "var(--bg)", color: "var(--text)", outline: "none" }}
+            />
+            <button
+              type="button"
+              onClick={() => void sendSteer()}
+              disabled={controlBusy || !steerInput.trim()}
+              style={{ height: 28, padding: "0 10px", fontSize: 11, borderRadius: 5, border: "1px solid var(--border)", background: "var(--bg)", color: "var(--text)", cursor: controlBusy || !steerInput.trim() ? "default" : "pointer", opacity: controlBusy || !steerInput.trim() ? 0.5 : 1 }}
+            >
+              Steer
+            </button>
+            <button
+              type="button"
+              onClick={() => void abortRun()}
+              disabled={controlBusy}
+              style={{ height: 28, padding: "0 10px", fontSize: 11, borderRadius: 5, border: "1px solid rgba(220,38,38,0.4)", background: "rgba(220,38,38,0.08)", color: "#dc2626", cursor: controlBusy ? "default" : "pointer" }}
+            >
+              Stop
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

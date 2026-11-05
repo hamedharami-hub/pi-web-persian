@@ -1,6 +1,14 @@
 export interface ModelsData {
   models: Record<string, string>;
-  modelList: { id: string; name: string; provider: string; input?: string[]; free?: boolean }[];
+  modelList: {
+    id: string;
+    name: string;
+    provider: string;
+    input?: string[];
+    free?: boolean;
+    /** Dollars per 1M tokens, as the provider catalog lists them. */
+    cost?: { input: number; output: number };
+  }[];
   defaultModel: { provider: string; modelId: string } | null;
   /** Resolved thinking level a new session starts with when the user has not picked one. */
   defaultThinkingLevel: string | null;

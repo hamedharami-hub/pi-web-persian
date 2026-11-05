@@ -797,6 +797,8 @@ export const zhCNLocale: LocalePlugin = {
     "chat.allModels": "所有模型",
     "chat.freeModels": "免费模型",
     "chat.saveDefaultModel": "使用并设为新会话默认模型",
+    "chat.starModel": "加星号以便快速访问",
+    "chat.unstarModel": "从星标中移除",
     "chat.defaultModel": "新会话默认模型",
     "chat.saveDefaultThinking": "使用并设为新会话默认推理级别",
     "chat.defaultThinking": "新会话默认推理级别",

@@ -797,6 +797,8 @@ export const zhTWLocale: LocalePlugin = {
     "chat.allModels": "所有模型",
     "chat.freeModels": "免費模型",
     "chat.saveDefaultModel": "使用並設為新工作階段預設模型",
+    "chat.starModel": "加星號以便快速存取",
+    "chat.unstarModel": "從星號中移除",
     "chat.defaultModel": "新工作階段預設模型",
     "chat.saveDefaultThinking": "使用並設為新工作階段預設推理層級",
     "chat.defaultThinking": "新工作階段預設推理層級",

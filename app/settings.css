@@ -2625,3 +2625,79 @@ select.mcp-add-input {
     }
   }
 }
+
+/* The "?" that explains a sub-agent profile, its suggested model and its cost. */
+.agents-help-button {
+  flex: 0 0 auto;
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--bg);
+  color: var(--text-dim);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  transition: color 0.1s, border-color 0.1s, background 0.1s;
+}
+
+.agents-help-button:hover,
+.agents-help-button[aria-expanded="true"] {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--bg-hover);
+}
+
+.agents-help-button.is-inline {
+  align-self: flex-start;
+  margin: 2px 8px 0 0;
+}
+
+.agents-help-panel {
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--bg-panel);
+  padding: 10px 12px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-muted);
+}
+
+.agents-help-panel p {
+  margin: 0 0 6px;
+}
+
+.agents-help-panel p:last-child {
+  margin-bottom: 0;
+}
+
+.agents-help-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 6px;
+  color: var(--text);
+}
+
+.agents-help-panel-close {
+  border: none;
+  background: none;
+  color: var(--text-dim);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.agents-help-panel-close:hover {
+  color: var(--text);
+}
+
+.agents-help-panel-note {
+  color: var(--text-dim);
+  font-size: 11px;
+}

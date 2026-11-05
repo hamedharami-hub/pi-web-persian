@@ -4,6 +4,13 @@ import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { useI18n } from "@/hooks/useI18n";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { SelectorRow } from "./SelectorRow";
+import {
+  isModelFavorite,
+  MODEL_FAVORITES_STORAGE_KEY,
+  parseModelFavorites,
+  serializeModelFavorites,
+  toggleModelFavorite,
+} from "@/lib/model-favorites";
 
 export interface ModelSelectorOption {
   provider: string;
@@ -32,6 +39,8 @@ interface ModelSelectorProps {
   defaultValue?: { provider: string; modelId: string } | null;
   /** Shows a star on every row that saves it as the default. */
   onSetDefault?: (provider: string, modelId: string) => void;
+  /** Shows the multi-select starred-favourites toggle, stored in this browser. */
+  enableFavorites?: boolean;
 }
 
 const MODEL_FILTER_THRESHOLD = 8;
@@ -94,6 +103,7 @@ export function ModelSelector({
   placement = "up",
   defaultValue,
   onSetDefault,
+  enableFavorites = true,
 }: ModelSelectorProps) {
   const { t } = useI18n();
   const isMobile = useIsMobile();
@@ -105,9 +115,44 @@ export function ModelSelector({
   const [listView, setListView] = useState<"all" | "free">("all");
   const [openProvider, setOpenProvider] = useState<string | null>(null);
   const locked = disabled || busy;
+  const [favorites, setFavorites] = useState<string[]>([]);
+  const favoritesLoadedRef = useRef(false);
+  useEffect(() => {
+    if (favoritesLoadedRef.current) return;
+    favoritesLoadedRef.current = true;
+    try {
+      setFavorites(parseModelFavorites(window.localStorage.getItem(MODEL_FAVORITES_STORAGE_KEY)));
+    } catch {
+      /* storage can be unavailable (private mode); favorites stay empty */
+    }
+  }, []);
+  const updateFavorites = (next: string[]) => {
+    setFavorites(next);
+    try {
+      window.localStorage.setItem(MODEL_FAVORITES_STORAGE_KEY, serializeModelFavorites(next));
+    } catch {
+      /* keep the in-memory list when storage refuses the write */
+    }
+  };
+  const favoriteRow = (option: ModelSelectorOption) => enableFavorites ? {
+    isFavorite: isModelFavorite(favorites, option.provider, option.modelId),
+    addLabel: t("chat.starModel"),
+    removeLabel: t("chat.unstarModel"),
+    onToggle: () => updateFavorites(toggleModelFavorite(favorites, option.provider, option.modelId)),
+  } : undefined;
   // Options arrive in pi's /model order (orderSelectorModels()); never re-sort
   // them, or a models.json provider loses the order its file gives (#783).
   const filteredOptions = filterModelOptions(options, filter);
+  const favoriteOptions = enableFavorites
+    ? favorites
+        .map((key) => {
+          const separator = key.indexOf("/");
+          const provider = key.slice(0, separator);
+          const modelId = key.slice(separator + 1);
+          return filteredOptions.find((option) => option.provider === provider && option.modelId === modelId);
+        })
+        .filter((option): option is ModelSelectorOption => option !== undefined)
+    : [];
   const showFilter = options.length > MODEL_FILTER_THRESHOLD;
   const freeOptions = filterFreeModelOptions(options);
   const visibleOptions = listView === "free" ? filterFreeModelOptions(filteredOptions) : filteredOptions;
@@ -115,6 +160,11 @@ export function ModelSelector({
   const starredOption = onSetDefault && listView === "all"
     ? findStarredModelOption(filteredOptions, defaultValue)
     : undefined;
+  // The default model already has its own section; listing it among the
+  // starred rows too would show the same model twice.
+  const favoriteRows = starredOption
+    ? favoriteOptions.filter((option) => option.provider !== starredOption.provider || option.modelId !== starredOption.modelId)
+    : favoriteOptions;
 
   const currentName = selectedLabel ?? (value
     ? options.find((option) => option.modelId === value.modelId && option.provider === value.provider)?.name ?? value.modelId
@@ -233,6 +283,7 @@ export function ModelSelector({
         defaultLabel: t("chat.defaultModel"),
         onSave: () => saveDefault(option),
       } : undefined}
+      favorite={favoriteRow(option)}
     >
       <OptionLabel label={option.name} provider={showProvider ? option.provider : undefined} />
     </SelectorRow>
@@ -429,6 +480,14 @@ export function ModelSelector({
                 ) : visibleOptions.map((option) => renderModelRow(option, true))
               ) : (
                 <>
+                  {favoriteRows.length > 0 && (
+                    <section className="model-starred-section" aria-label={t("chat.starredModels")}>
+                      <div style={{ padding: "7px 12px 4px", color: "var(--text-dim)", fontSize: 10, fontWeight: 600, textTransform: "uppercase" }}>
+                        {t("chat.starredModels")} ({favoriteRows.length})
+                      </div>
+                      {favoriteRows.map((option) => renderModelRow(option, true))}
+                    </section>
+                  )}
                   {starredOption && (
                     <section className="model-starred-section" aria-label={t("chat.starredModels")}>
                       <div style={{ padding: "7px 12px 4px", color: "var(--text-dim)", fontSize: 10, fontWeight: 600, textTransform: "uppercase" }}>

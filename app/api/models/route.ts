@@ -21,7 +21,7 @@ export const dynamic = "force-dynamic";
 
 async function loadModels(cwd: string): Promise<ModelsData> {
   const nameMap = new Map<string, string>();
-  let modelList: { id: string; name: string; provider: string; input?: string[]; free: boolean }[] = [];
+  let modelList: ModelsData["modelList"] = [];
   let defaultModel: { provider: string; modelId: string } | null = null;
   const thinkingLevels: Record<string, string[]> = {};
   const thinkingLevelMaps: Record<string, Record<string, string | null>> = {};
@@ -52,6 +52,9 @@ async function loadModels(cwd: string): Promise<ModelsData> {
     provider: m.provider,
     input: m.input,
     free: isFreeModel(m),
+    ...(m.cost && (m.cost.input > 0 || m.cost.output > 0)
+      ? { cost: { input: m.cost.input, output: m.cost.output } }
+      : {}),
   }));
   for (const m of visible) {
     const key = `${m.provider}:${m.id}`;
