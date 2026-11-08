@@ -38,6 +38,9 @@
 ## Opening the browser at startup (`bin/pi-web.js`, `bin/browser-opener.js`)
 - The launcher opens the browser once `GET /` has answered and its body arrived (`openWhenServing()`, `waitForFirstPage()`), not on Next.js's "Ready" line. Next prints "Ready" before it loads its request handlers, and the first request then also waits out the pi SDK import `instrumentation-node.ts` starts (#964): about 0.55 s on macOS, but #964 measured the import alone at 5.6 s on Windows, and a launch whose first navigation outlasts the service worker's 8 s timeout opens on `offline.html` (#1358). Any status counts and redirects are followed: with `PI_WEB_PASSWORD` the proxy answers `/` with a redirect to `/login` while the SDK import is still running, so stopping at that redirect left the browser's navigation waiting for the rest of it. A wildcard bind is asked on loopback (`getOpenUrl()`), port 0 opens at once, and after 30 s the browser opens anyway. The run record still goes out on "Ready": status, stop and open list a record only once its URL answers.
 
+## Notification permission is explicit
+- Background completion and attention delivery in `AppShell.deliverSessionNotification()` uses only an already-granted browser permission. It never calls `Notification.requestPermission()`: dismissing the browser prompt otherwise made later background events ask repeatedly, without a fresh user gesture. `SettingsPanel`'s Register push remains the explicit permission-request entry point. Denied/default/unsupported states are quiet and keep in-page indicators; this does not auto-approve tool or project permissions.
+
 ## Completion sound
 - `hooks/useAudio.ts` stores the toggle in `localStorage` as `pi-sound-enabled` and reuses one `AudioContext`.
 - Autoplay policy requires unlocking sound from a user gesture: `ChatInput` calls the unlock hook from interactive controls, and `ChatWindow` plays the tone from `onAgentEnd`.

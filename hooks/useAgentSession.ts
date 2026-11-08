@@ -15,6 +15,8 @@ import type {
 } from "@/lib/types";
 import { isBlockingExtensionUiRequest } from "@/lib/browser-notifications";
 import { normalizeToolCalls } from "@/lib/normalize";
+import { isMessageGroupAnchor } from "@/lib/message-display";
+import { getTurnSettlementOutcome } from "@/lib/turn-completion";
 import { AgentCommandError, agentStatusUrl, isPromptRejectedError, sendAgentCommand } from "@/lib/agent-client";
 import { createSideChat, SIDE_REFUSAL_MESSAGES } from "@/lib/side-chat-client";
 import { missingCwdFromBody } from "@/lib/missing-cwd";
@@ -561,6 +563,9 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const thinkingLevelPinsRef = useRef<Record<string, string>>({});
   const defaultThinkingLevelRef = useRef<ConcreteThinkingLevel | null>(null);
   const promptRunIdRef = useRef(0);
+  // A slash command may not append transcript messages. Never attribute an older
+  // incomplete turn to it, and never inspect entries before the current send.
+  const runTranscriptBaselineRef = useRef<{ runId: number; entryId: string | null; command: boolean; modelStarted: boolean } | null>(null);
   const optimisticUserMessageKeyRef = useRef<string | null>(null);
   // The run whose prompt the server is known to have got: one of its events
   // (agent_start, prompt_done, queue_update, its user message) arrived, maybe
@@ -589,6 +594,14 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const historyCursorRef = useRef<string | null>(null);
   const hasEarlierMessagesRef = useRef(false);
   const earlierTurnCountRef = useRef(0);
+  const extensionUiSnapshotSessionRef = useRef<string | null>(null);
+  // HTTP is only a fallback until the stream's authoritative full UI snapshot.
+  // An older mount/state response must never erase replayed statuses/widgets.
+  const applyLoadedExtensionUiState = useCallback((sid: string, state: AgentStateResponse) => {
+    if (extensionUiSnapshotSessionRef.current === sid) return;
+    if (state.extensionStatuses !== undefined) setExtensionStatuses(state.extensionStatuses ?? []);
+    if (state.extensionWidgets !== undefined) setExtensionWidgets(state.extensionWidgets ?? []);
+  }, []);
 
   sessionPropIdRef.current = session?.id ?? null;
   dataRef.current = data;
@@ -924,8 +937,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         if (liveState) {
           applyLiveUsage(liveState, sid, runId, usageRequestId);
           if (liveState.systemPrompt !== undefined) setSystemPrompt(liveState.systemPrompt ?? null);
-          if (liveState.extensionStatuses !== undefined) setExtensionStatuses(liveState.extensionStatuses ?? []);
-          if (liveState.extensionWidgets !== undefined) setExtensionWidgets(liveState.extensionWidgets ?? []);
+          applyLoadedExtensionUiState(sid, liveState);
           if (liveState.queuedMessages !== undefined) setQueuedMessages(normalizeQueuedMessages(liveState.queuedMessages));
           if (liveState.autoCompactionEnabled !== undefined) setAutoCompactionEnabled(liveState.autoCompactionEnabled ?? true);
         } else if (!agentState.running) {
@@ -948,7 +960,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       if (loadFlightsRef.current.get(flightKey) === flight) loadFlightsRef.current.delete(flightKey);
     });
     return await flight;
-  }, [applyLiveUsage, setToolPresetState, syncLiveModel]);
+  }, [applyLiveUsage, applyLoadedExtensionUiState, setToolPresetState, syncLiveModel]);
 
   const loadContext = useCallback(async (sid: string, leafId: string | null, before?: string | null, options?: { tail?: number; signal?: AbortSignal }) => {
     try {
@@ -1591,32 +1603,50 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     eventStreamGraceDueAtRef.current = Date.now() + EVENT_STREAM_IDLE_GRACE_MS;
   }, [cancelEventStreamGrace, closeEvents, syncLiveModel]);
 
-  const finishPromptWithoutStream = useCallback(async (sid: string | null = sessionIdRef.current, runId = promptRunIdRef.current) => {
+  const finishPromptWithoutStream = useCallback(async (sid: string | null = sessionIdRef.current, runId = promptRunIdRef.current, interrupted = false) => {
     // Bail out before loadSession too: a stale finish for a previous run
     // must not overwrite the messages of the run currently streaming.
-    if (promptRunIdRef.current !== runId) return;
+    if (!sessionHookMountedRef.current || promptRunIdRef.current !== runId || (sid && sessionIdRef.current !== sid)) return;
     const readSeqBefore = sessionReadSeqRef.current;
     try {
-      if (sid) await loadSession(sid);
+      if (sid) await loadSession(sid, false, false, { force: true });
     } finally {
-      if (promptRunIdRef.current !== runId) return;
+      if (!sessionHookMountedRef.current || promptRunIdRef.current !== runId || (sid && sessionIdRef.current !== sid)) return;
       // The server is idle: an unconfirmed send of this run either is in the
       // read just made or never arrived.
       if (sid) settleUnconfirmedSend(sid, runId, readSeqBefore);
+      // Reconnecting SSE may already have recreated an idle wrapper after a crash.
+      // Its existence is not proof that the previous run finished: inspect the
+      // fresh saved tail as well, without ever replaying a side-effecting tool.
+      const read = lastReadContextRef.current;
+      let saved = read?.sid === sid && read.seq > readSeqBefore ? read.messages : null;
+      const baseline = runTranscriptBaselineRef.current?.runId === runId ? runTranscriptBaselineRef.current : null;
+      const baselineIndex = baseline?.entryId ? (read?.entryIds.indexOf(baseline.entryId) ?? -1) : -1;
+      if (baseline?.entryId && baselineIndex < 0) saved = null; // History window cannot establish this run's boundary.
+      const start = Math.max(baselineIndex + 1, saved?.findLastIndex(isMessageGroupAnchor) ?? 0, 0);
+      // Missing SSE start events are not evidence of a model-free command. The
+      // fresh post-send transcript takes precedence over what the stream saw.
+      const hasNewAssistant = saved?.slice(start).some((message) => message.role === "assistant") ?? false;
+      const commandOnly = saved !== null && baseline?.command && !baseline.modelStarted && !hasNewAssistant;
+      const outcome = commandOnly ? "answered" : saved ? getTurnSettlementOutcome(saved, start, saved.length) : "unknown";
+      const endedWithoutAnswer = interrupted || outcome !== "answered";
       const promptWasPending = rpcPromptPendingRef.current;
       const agentWasActive = sdkAgentActiveRef.current;
       rpcPromptPendingRef.current = false;
       sdkAgentActiveRef.current = false;
       optimisticUserMessageKeyRef.current = null;
       const wasRunning = settleUiStage();
+      const noticeKey = interrupted ? "chat.runUnavailable" : outcome === "missing_tool_result" ? "chat.missingToolResult"
+        : outcome === "no_final_response" ? "chat.noFinalResponse" : outcome === "unknown" ? "chat.runOutcomeUnknown" : null;
+      if (wasRunning && noticeKey) addNotice({ type: "warning", message: translate(noticeKey) });
       if (promptWasPending) {
-        notifyPromptStage(runId);
+        notifyPromptStage(runId, endedWithoutAnswer);
       } else if (agentWasActive && wasRunning) {
-        onAgentEnd?.({ aborted: false });
+        onAgentEnd?.({ aborted: endedWithoutAnswer });
       }
       if (sid) scheduleEventStreamClose(sid);
     }
-  }, [loadSession, notifyPromptStage, onAgentEnd, scheduleEventStreamClose, settleUiStage, settleUnconfirmedSend]);
+  }, [addNotice, loadSession, notifyPromptStage, onAgentEnd, scheduleEventStreamClose, settleUiStage, settleUnconfirmedSend, translate]);
 
   const waitForPromptSettlement = useCallback(async (sid: string, runId?: number) => {
     await delay(PROMPT_SETTLE_INITIAL_DELAY_MS);
@@ -1630,8 +1660,8 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           const data = await res.json() as { running?: boolean; state?: AgentStateResponse };
           const state = data.state;
           syncLiveModel(state);
-          if (!data.running || !state || (!state.isStreaming && !state.isPromptRunning)) {
-            await finishPromptWithoutStream(sid, runId);
+          if (!data.running || !state || (!state.isStreaming && !state.isPromptRunning && !state.isCompacting)) {
+            await finishPromptWithoutStream(sid, runId, !data.running || !state);
             return;
           }
         }
@@ -1706,8 +1736,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       }
       if (!agentRunningRef.current) return;
       if (state) {
-        if (state.extensionStatuses !== undefined) setExtensionStatuses(state.extensionStatuses ?? []);
-        if (state.extensionWidgets !== undefined) setExtensionWidgets(state.extensionWidgets ?? []);
+        applyLoadedExtensionUiState(sid, state);
         // The poll leaves the prompt out: read the one the run ended with once, as agent_end does.
         fetch(`/api/agent/${encodeURIComponent(sid)}`)
           .then((r) => r.ok ? r.json() : null)
@@ -1717,11 +1746,11 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           })
           .catch(() => {});
       }
-      await finishPromptWithoutStream(sid, runId);
+      await finishPromptWithoutStream(sid, runId, !data.running || !state);
     } catch {
       // Network still down — the next poll / visibility / online tick retries.
     }
-  }, [applyLiveUsage, finishPromptWithoutStream, syncLiveModel]);
+  }, [applyLiveUsage, applyLoadedExtensionUiState, finishPromptWithoutStream, syncLiveModel]);
 
   // Recovery net for missed SSE events: while the agent is running, verify
   // against the server periodically and whenever the tab returns to the
@@ -1762,6 +1791,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           setExtensionCustomUis((queue) => retainExtensionUiRequests(queue, pending));
         }
         if (event.isStreaming === true) {
+          if (runTranscriptBaselineRef.current?.runId === promptRunIdRef.current) runTranscriptBaselineRef.current.modelStarted = true;
           cancelEventStreamGrace();
           sdkAgentActiveRef.current = true;
           agentRunningRef.current = true;
@@ -1776,7 +1806,14 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         if (sessionIdRef.current) void refreshContextUsage(sessionIdRef.current);
         break;
       }
+      case "extension_ui_snapshot":
+        if (event.sessionId !== sessionIdRef.current) break;
+        extensionUiSnapshotSessionRef.current = event.sessionId as string;
+        if (Array.isArray(event.statuses)) setExtensionStatuses(event.statuses as ExtensionStatusItem[]);
+        if (Array.isArray(event.widgets)) setExtensionWidgets(event.widgets as ExtensionWidgetItem[]);
+        break;
       case "agent_start":
+        if (runTranscriptBaselineRef.current?.runId === promptRunIdRef.current) runTranscriptBaselineRef.current.modelStarted = true;
         markPromptLanded();
         cancelEventStreamGrace();
         sdkAgentActiveRef.current = true;
@@ -1809,8 +1846,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
               syncLiveModel(d.state);
               applyLiveUsage(d.state, sid, runId, usageRequestId);
               if (d.state?.systemPrompt !== undefined) setSystemPrompt(d.state.systemPrompt ?? null);
-              if (d.state?.extensionStatuses !== undefined) setExtensionStatuses(d.state.extensionStatuses ?? []);
-              if (d.state?.extensionWidgets !== undefined) setExtensionWidgets(d.state.extensionWidgets ?? []);
+              if (d.state) applyLoadedExtensionUiState(sid, d.state);
               // Aborted turns can leave messages queued in pi (delivered with the
               // next turn); dead wrapper (no state) means the queue is gone.
               setQueuedMessages(normalizeQueuedMessages(d.state?.queuedMessages));
@@ -1973,6 +2009,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
               toolCallId: id,
               toolName: name,
               content,
+              isPartial: true,
               isError: partialResult?.isError,
               details: partialResult?.details,
             });
@@ -2052,7 +2089,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         setExtensionDialogs((queue) => removeExtensionUiRequest(queue, event.id as string));
         break;
     }
-  }, [addNotice, applyLiveUsage, cancelEventStreamGrace, dispatch, handleExtensionUiRequest, loadSession, markPromptLanded, notifyPromptStage, onAgentEnd, onToolEnd, refreshContextUsage, scheduleEventStreamClose, scrollToBottom, settleUiStage, syncLiveModel]);
+  }, [addNotice, applyLiveUsage, applyLoadedExtensionUiState, cancelEventStreamGrace, dispatch, handleExtensionUiRequest, loadSession, markPromptLanded, notifyPromptStage, onAgentEnd, onToolEnd, refreshContextUsage, scheduleEventStreamClose, scrollToBottom, settleUiStage, syncLiveModel]);
   handleAgentEventRef.current = handleAgentEvent;
 
   const handleSend = useCallback(async (message: string, images?: AttachedImage[]) => {
@@ -2104,6 +2141,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     const userKey = userMessageKey(userMsg);
     const savedViewIds = entryIdsRef.current;
     const lastEntryIdAtSend = savedViewIds.at(-1) ?? null;
+    runTranscriptBaselineRef.current = { runId: promptRunId, entryId: lastEntryIdAtSend, command: isSlashCommandPrompt, modelStarted: false };
     const sameTextAfterSend = countUserMessages(messagesRef.current.slice(savedViewIds.length), userKey);
     setMessages((prev) => [...prev, userMsg]);
     optimisticUserMessageKeyRef.current = userKey;
@@ -3015,11 +3053,10 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     if (agentState?.state) {
       if (agentState.state.isCompacting !== undefined) setIsCompacting(agentState.state.isCompacting);
       if (agentState.state.systemPrompt !== undefined) setSystemPrompt(agentState.state.systemPrompt ?? null);
-      if (agentState.state.extensionStatuses !== undefined) setExtensionStatuses(agentState.state.extensionStatuses ?? []);
-      if (agentState.state.extensionWidgets !== undefined) setExtensionWidgets(agentState.state.extensionWidgets ?? []);
+      applyLoadedExtensionUiState(sid, agentState.state);
       if (agentState.state.queuedMessages !== undefined) setQueuedMessages(normalizeQueuedMessages(agentState.state.queuedMessages));
     }
-  }, [dispatch, loadTools, waitForBashSettlement, waitForPromptSettlement]);
+  }, [applyLoadedExtensionUiState, dispatch, loadTools, waitForBashSettlement, waitForPromptSettlement]);
 
   // Open a released stream again and read what it missed (a run another tab, a
   // device or an extension started or finished, statuses), shown as the mount

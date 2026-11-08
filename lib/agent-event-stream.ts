@@ -11,6 +11,7 @@ export interface AgentEventStreamSession {
   readonly streamingMessage: unknown;
   isAlive?(): boolean;
   onEvent(listener: (event: AgentEventLike) => void): () => void;
+  getExtensionUiSnapshot?(): { statuses: unknown[]; widgets: unknown[] };
 }
 
 /**
@@ -335,6 +336,11 @@ export function createAgentEventStream(
           });
           info.connectedAt = Date.now();
           for (const event of bufferedEvents) forwardEvent(event, snapshot);
+          // The cold-start extension events may predate this subscription.
+          // After buffered events, publish full current UI state, including
+          // removals while the page was offline. Older wrappers use HTTP fallback.
+          const extensionUi = session.getExtensionUiSnapshot?.();
+          if (extensionUi) encode({ type: "extension_ui_snapshot", sessionId, ...extensionUi });
           if (snapshot !== undefined && snapshot !== null) {
             forwardEvent({ type: "message_start", message: snapshot }, undefined);
           }

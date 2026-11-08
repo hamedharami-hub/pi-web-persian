@@ -11,6 +11,7 @@ import { EXTENSION_DIALOG_BASE_WIDTH, fitExtensionDialogWidth } from "@/lib/exte
 import { asBracketedPaste, toTerminalKeyData } from "@/lib/terminal-input";
 import { collapsesProcessDetails, countToolCallBlocks, getDisplayableAssistantBlocks, hasAssistantAnswer, isHiddenCustomMessage, isMessageGroupAnchor, splitFinalAssistantBlocks } from "@/lib/message-display";
 import { extractTurnWrittenFiles, type WrittenFile } from "@/lib/turn-written-files";
+import { getIncompleteTurnReason } from "@/lib/turn-completion";
 import { getFinalAnswerViews, keepWrittenFiles, type FinalAnswerViews } from "@/lib/turn-views";
 import { formatTurnDuration, getTurnDurationMs } from "@/lib/turn-duration";
 import { buildQuotedSelection } from "@/lib/quoted-selection";
@@ -1317,6 +1318,24 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
                 for (let renderIdx = finalAssistantIdx + 1; renderIdx < endIdx; renderIdx++) {
                   rendered.push(renderMessage(renderIdx));
                 }
+                // This is a settled historical turn (live tails took the branch above).
+                // A server restart can leave a persisted tool call with no result forever.
+                // Never silently present that as success or automatically replay its command.
+                const incomplete = !loading ? getIncompleteTurnReason(messages, groupStartIdx, endIdx) : null;
+                if (incomplete) {
+                  rendered.push(
+                    <div key={`incomplete-${messageKeys[groupStartIdx]}`} role="status" className="my-2 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-[13px] text-text-muted">
+                      <p>{t(incomplete === "missing_tool_result" ? "chat.missingToolResult" : "chat.noFinalResponse")}</p>
+                      {endIdx === messages.length && (
+                        <button type="button" disabled={sessionBusy || isStreaming || isCompacting || Boolean(editEntryId)}
+                          className="mt-2 rounded border border-amber-500/40 px-3 py-1.5 disabled:opacity-50"
+                          onClick={() => { if (!sessionBusy && !isStreaming && !isCompacting && !editEntryId) void handleSend(t("chat.inspectBeforeContinuePrompt")); }}>
+                          {t("chat.inspectBeforeContinue")}
+                        </button>
+                      )}
+                    </div>,
+                  );
+                }
                 idx = endIdx;
               }
               const { startIndex } = getVisibleRenderWindow(rendered.length, visibleCount);
@@ -1516,8 +1535,10 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
         <ExtensionStatusBar
           statuses={extensionStatuses}
           widgets={extensionWidgets}
-          onCommand={handleSend}
-          commandsDisabled={sessionBusy}
+          onCommand={(command) => {
+            if (!editEntryId && !sessionBusy && !isStreaming && !isCompacting) void handleSend(command);
+          }}
+          commandsDisabled={sessionBusy || isStreaming || isCompacting || Boolean(editEntryId)}
         />
       </div>
       {isEmptyNew && <div className="min-h-0 flex-1" />}

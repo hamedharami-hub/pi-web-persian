@@ -1114,14 +1114,10 @@ export function AppShell() {
     if (Notification.permission === "granted") {
       fire();
       void setupPushSubscription(locale);
-    } else if (Notification.permission === "default") {
-      void Notification.requestPermission().then((p) => {
-        if (p === "granted") {
-          fire();
-          void setupPushSubscription(locale);
-        }
-      });
     }
+    // Completion/attention is not a permission-request gesture. If the user
+    // dismissed the browser prompt, background events must not ask again.
+    // Settings > Register push remains the explicit opt-in entry point.
   }, [handleSelectSession, locale]);
 
   const handleAgentEnd = useCallback((end: AgentEndInfo) => {

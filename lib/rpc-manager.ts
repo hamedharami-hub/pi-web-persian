@@ -1043,6 +1043,12 @@ export class AgentSessionWrapper {
     cacheSessionPath(this.inner.sessionId, sessionFile);
   }
 
+  // Read only after the SSE listener is attached: session_start may already
+  // have populated these before a cold page subscribes. Empty lists matter too.
+  getExtensionUiSnapshot(): { statuses: Array<{ key: string; text: string }>; widgets: ExtensionWidgetItem[] } {
+    return { statuses: this.getExtensionStatuses(), widgets: this.getExtensionWidgets() };
+  }
+
   onEvent(listener: EventListener): () => void {
     this.listeners.add(listener);
     for (const event of this.pendingUiRequests.values()) listener(event);

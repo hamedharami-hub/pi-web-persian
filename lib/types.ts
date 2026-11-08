@@ -85,6 +85,8 @@ export interface AssistantMessage {
 
 export interface ToolResultMessage {
   role: "toolResult";
+  /** Client-only live progress snapshot, not a recorded final result. Never persisted. */
+  isPartial?: boolean;
   toolCallId: string;
   toolName?: string;
   content: (TextContent | ImageContent)[];

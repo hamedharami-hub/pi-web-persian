@@ -81,8 +81,8 @@ async function setup() {
     hook.flush();
   };
   // The mount's own state read, reporting only that the run streams.
-  const landStateRead = async () => {
-    stateRead.resolve(json({ running: true, state: { isStreaming: true, isPromptRunning: false } }));
+  const landStateRead = async (extra = {}) => {
+    stateRead.resolve(json({ running: true, state: { isStreaming: true, isPromptRunning: false, ...extra } }));
     await settle();
     hook.flush();
   };
@@ -104,6 +104,42 @@ function teardown(state) {
   state.hook.unmount();
   mock.timers.reset();
 }
+
+test("cold-start UI snapshot survives an older empty HTTP state and reconnect clears removed items", async () => {
+  const state = await setup();
+  try {
+    await state.emit({ type: "connected", sessionId: "s1", isStreaming: false }, {
+      type: "extension_ui_snapshot", sessionId: "s1",
+      statuses: [{ key: "command:/plan", text: "Plan OFF" }],
+      widgets: [{ key: "todos", lines: ["step"] }],
+    });
+    await state.landStateRead({ extensionStatuses: [], extensionWidgets: [] });
+    assert.deepEqual(state.hook.result.extensionStatuses, [{ key: "command:/plan", text: "Plan OFF" }]);
+    assert.deepEqual(state.hook.result.extensionWidgets, [{ key: "todos", lines: ["step"] }]);
+    await state.emit({ type: "extension_ui_snapshot", sessionId: "old", statuses: [], widgets: [] });
+    assert.equal(state.hook.result.extensionStatuses.length, 1, "ignore another session's snapshot");
+    await state.reconnect();
+    await state.emit({ type: "connected", sessionId: "s1", isStreaming: false }, {
+      type: "extension_ui_snapshot", sessionId: "s1", statuses: [], widgets: [],
+    });
+    assert.deepEqual(state.hook.result.extensionStatuses, []);
+    assert.deepEqual(state.hook.result.extensionWidgets, []);
+  } finally { teardown(state); }
+});
+
+test("shell progress snapshots stay explicitly partial until their execution ends", async () => {
+  const state = await setup();
+  try {
+    await state.emit({ type: "connected", sessionId: "s1", isStreaming: true });
+    for (const toolName of ["bash", "powershell", "codemode"]) {
+      await state.emit({ type: "tool_execution_update", toolCallId: "partial", toolName,
+        partialResult: { content: [{ type: "text", text: "still running" }] } });
+      assert.equal(state.hook.result.activeToolResults.get("partial")?.isPartial, true);
+      await state.emit({ type: "tool_execution_end", toolCallId: "partial", toolName });
+      assert.equal(state.hook.result.activeToolResults.has("partial"), false);
+    }
+  } finally { teardown(state); }
+});
 
 test("a replayed running tool keeps its phase when the mount's state read lands", async () => {
   const state = await setup();

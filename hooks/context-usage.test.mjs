@@ -130,6 +130,7 @@ test("each event stream connection reads usage, since connecting resumes an idle
     script.runInNewContext({
       event: { type: "connected", sessionId: sid ?? "pending", isStreaming },
       sessionIdRef: { current: sid }, sdkAgentActiveRef: { current: false }, agentRunningRef: { current: false },
+      runTranscriptBaselineRef: { current: null }, promptRunIdRef: { current: 1 },
       dispatch() {}, cancelEventStreamGrace() {}, setAgentRunning() {}, setAgentPhase() {},
       refreshContextUsage: (id) => reads.push(id),
     });
