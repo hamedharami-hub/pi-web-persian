@@ -23,6 +23,10 @@ function setup(state, running = true, savedMessages = [{ role: "user", content: 
     getTurnSettlementOutcome, isMessageGroupAnchor, runTranscriptBaselineRef: { current: null },
     rpcPromptPendingRef: { current: true }, sdkAgentActiveRef: { current: true },
     optimisticUserMessageKeyRef: { current: "prompt" }, contextUsageRequestIdRef: { current: 0 },
+    // v0.17.0's unconfirmed-send settlement: no send is parked here, so nothing
+    // is restored to the composer and the run settles through its transcript.
+    unconfirmedSendRef: { current: null },
+    settleUnconfirmedSend: () => false, dropUnconsumedCommandBubble() {},
     loadSession: async (sid) => { reads.push(sid); context.lastReadContextRef.current = { sid, seq: ++context.sessionReadSeqRef.current, messages: savedMessages, entryIds: savedMessages.map((_, i) => `entry-${i}`) }; }, settleUnconfirmedSend() {},
     settleUiStage: () => { const was = context.agentRunningRef.current; context.agentRunningRef.current = false; return was; },
     addNotice: (notice) => notices.push(notice), translate: (key) => key,

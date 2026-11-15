@@ -46,7 +46,7 @@ const runningCodemode = {
   },
 };
 
-async function setup() {
+async function setup(options = {}) {
   mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
   const sources = [];
   const stateRead = Promise.withResolvers();
@@ -71,7 +71,7 @@ async function setup() {
     throw new Error(`unexpected fetch ${url} ${init.body ?? ""}`);
   };
 
-  const hook = renderHook(useAgentSession, { session: { id: "s1", name: "S", cwd: "/project" } });
+  const hook = renderHook(useAgentSession, { session: { id: "s1", name: "S", cwd: "/project" }, ...options });
   await settle();
   hook.flush();
   const stream = () => sources.find((source) => source.readyState !== 2);
@@ -97,7 +97,7 @@ async function setup() {
   };
   const phase = () => hook.result.agentPhase;
   const toolNames = () => phase()?.tools?.map((tool) => tool.name);
-  return { hook, emit, landStateRead, reconnect, phase, toolNames };
+  return { hook, emit, landStateRead, reconnect, phase, toolNames, sources };
 }
 
 function teardown(state) {
@@ -139,6 +139,23 @@ test("shell progress snapshots stay explicitly partial until their execution end
       assert.equal(state.hook.result.activeToolResults.has("partial"), false);
     }
   } finally { teardown(state); }
+});
+
+test("an extension's session end hands the session back and never reconnects", async () => {
+  const ended = [];
+  const state = await setup({ onSessionEnded: (id) => ended.push(id) });
+  try {
+    await state.emit({ type: "connected", sessionId: "s1", isStreaming: true });
+    await state.emit({ type: "session_ended", sessionId: "s1" });
+    assert.deepEqual(ended, ["s1"]);
+    assert.equal(state.sources[0].readyState, 2);
+    mock.timers.tick(90_000);
+    await settle();
+    state.hook.flush();
+    assert.equal(state.sources.length, 1, "no reconnect after end");
+  } finally {
+    teardown(state);
+  }
 });
 
 test("a replayed running tool keeps its phase when the mount's state read lands", async () => {
