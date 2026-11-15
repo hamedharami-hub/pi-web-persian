@@ -229,3 +229,42 @@ test("without widgets there is no shared row, and without status the row holds o
   assert.match(html, /extension-status-row/);
   assert.doesNotMatch(html, /extension-status-line/);
 });
+
+test("orders workflow chips semantically into grouped controls and hides duplicates when plan-todos is expanded", () => {
+  const statuses = [
+    { key: "command:/todos clear", text: "🗑 Delete plan" },
+    { key: "z-extra", text: "extra" },
+    { key: "command:/goal", text: "◎ Edit goal · Ship" },
+    { key: "command:/plan", text: "Plan ON · toggle" },
+    { key: "command:/todos refine", text: "Refine" },
+    { key: "command:/agents", text: "🤖 Team ON" },
+    { key: "command:/plan execute", text: "▶ Execute" },
+  ];
+
+  // Collapsed or without plan-todos expanded: all chips appear in semantic order with dividers.
+  const collapsedHtml = renderStatusBar({ statuses, onCommand: () => {} });
+  const planPos = collapsedHtml.indexOf("Plan ON · toggle");
+  const teamPos = collapsedHtml.indexOf("🤖 Team ON");
+  const goalPos = collapsedHtml.indexOf("◎ Edit goal · Ship");
+  const execPos = collapsedHtml.indexOf("▶ Execute");
+  const extraPos = collapsedHtml.indexOf(">extra<");
+  assert.ok(planPos !== -1 && planPos < teamPos && teamPos < goalPos && goalPos < execPos && execPos < extraPos);
+  assert.match(collapsedHtml, /extension-status-divider/);
+
+  // Expanded plan-todos widget: header already owns Execute/Refine/Delete, so bar omits duplicates.
+  const expandedHtml = renderStatusBar({
+    statuses,
+    widgets: [{
+      key: "plan-todos",
+      lines: ["SAVED — /todos", "☐ 1. Step one", "☐ 2. Step two"],
+      placement: "aboveEditor",
+    }],
+    onCommand: () => {},
+  });
+  const rowSection = expandedHtml.slice(expandedHtml.indexOf("extension-status-row"));
+  assert.doesNotMatch(rowSection, /command:\/plan execute/);
+  assert.doesNotMatch(rowSection, /command:\/todos refine/);
+  assert.doesNotMatch(rowSection, /command:\/todos clear/);
+  assert.match(rowSection, /Plan ON · toggle/);
+  assert.match(rowSection, /◎ Edit goal · Ship/);
+});

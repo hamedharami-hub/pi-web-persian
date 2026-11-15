@@ -42,19 +42,42 @@ function getDefaultExpandedWidgetKey(widgets: ExtensionWidgetItem[]): string | n
   })?.key ?? null;
 }
 
-function parsePlanTodosSummary(lines: string[]) {
+export interface ParsedPlanStep {
+  step: number;
+  text: string;
+  completed: boolean;
+}
+
+export interface PlanTodosSummary {
+  completed: number;
+  total: number;
+  status: "executing" | "planning" | "complete" | "saved";
+  statusKey: string;
+  paused: boolean;
+  hasWarning: boolean;
+  steps: ParsedPlanStep[];
+}
+
+export function parsePlanTodosSummary(lines: string[]): PlanTodosSummary | null {
   if (lines.length === 0) return null;
+  const steps: ParsedPlanStep[] = [];
   let completed = 0;
-  let total = 0;
   for (let i = 1; i < lines.length; i += 1) {
     const plain = stripAnsi(lines[i]).trim();
     if (!plain) continue;
-    if (plain.startsWith("☑")) {
-      completed += 1;
-      total += 1;
-    } else if (plain.startsWith("☐")) {
-      total += 1;
-    }
+    const checked = plain.startsWith("☑");
+    const unchecked = plain.startsWith("☐");
+    if (!checked && !unchecked) continue;
+    const body = plain.slice(1).trim();
+    const numMatch = body.match(/^([0-9]+)\.\s+(.*)$/);
+    const stepNumber = numMatch ? Number(numMatch[1]) : steps.length + 1;
+    const stepText = numMatch ? numMatch[2] : body;
+    if (checked) completed += 1;
+    steps.push({
+      step: Number.isFinite(stepNumber) && stepNumber > 0 ? stepNumber : steps.length + 1,
+      text: stepText,
+      completed: checked,
+    });
   }
   const headerText = stripAnsi(lines[0]).replace(/\s*—\s*\/todos\s*$/i, "").trim();
   const status = /^EXECUTING/i.test(headerText)
@@ -64,14 +87,16 @@ function parsePlanTodosSummary(lines: string[]) {
       : /^COMPLETE/i.test(headerText)
         ? "complete"
         : "saved";
-  const statusLabel = status === "executing"
-    ? "Executing"
+  const paused = /\(paused\)/i.test(headerText);
+  const hasWarning = /⚠|failed/i.test(headerText);
+  const statusKey = status === "executing"
+    ? "chat.planStatus.executing"
     : status === "planning"
-      ? "Planning"
+      ? "chat.planStatus.planning"
       : status === "complete"
-        ? "Marked done"
-        : "Plan ready";
-  return { completed, total, status, statusLabel };
+        ? "chat.planStatus.complete"
+        : "chat.planStatus.saved";
+  return { completed, total: steps.length, status, statusKey, paused, hasWarning, steps };
 }
 
 export function getNextExpandedWidgetKey(
@@ -94,7 +119,7 @@ export function ExtensionWidgets({
   widgets: ExtensionWidgetItem[];
   onCommand?: (command: string) => void;
   commandsDisabled?: boolean;
-  children?: ReactNode;
+  children?: ReactNode | ((info: { expandedWidgetKey: string | null }) => ReactNode);
 }) {
   const { t } = useI18n();
   const idPrefix = useId();
@@ -103,6 +128,7 @@ export function ExtensionWidgets({
   const [expandedWidgetKey, setExpandedWidgetKey] = useState<string | null>(
     () => getDefaultExpandedWidgetKey(widgets),
   );
+  const [tallPlanPanel, setTallPlanPanel] = useState(false);
   const [updatingWidgetKeys, setUpdatingWidgetKeys] = useState<ReadonlySet<string>>(
     () => new Set(),
   );
@@ -172,10 +198,13 @@ export function ExtensionWidgets({
     setExpandedWidgetKey((current) => getNextExpandedWidgetKey(current, widget.key));
   };
 
+  const resolvedExpandedKey = expandedWidget?.key ?? null;
+  const isTallPlan = tallPlanPanel && resolvedExpandedKey === "plan-todos";
+
   return (
     <>
       {expandedWidget && (
-        <div className="extension-widget-panels">
+        <div className={`extension-widget-panels${isTallPlan ? " is-tall" : ""}`}>
           {(() => {
             const widget = expandedWidget;
             const index = widgets.indexOf(widget);
@@ -183,6 +212,11 @@ export function ExtensionWidgets({
             const panelId = `${idPrefix}-panel-${index}`;
             const planSummary = widget.key === "plan-todos" ? parsePlanTodosSummary(widget.lines) : null;
             const bodyLines = planSummary && widget.lines.length > 1 ? widget.lines.slice(1) : widget.lines;
+            const showPlanActions = Boolean(onCommand) && Boolean(planSummary);
+            const canRunPlan = planSummary !== null
+              && planSummary.completed < planSummary.total
+              && (planSummary.status !== "executing" || planSummary.paused);
+            const nextPendingStep = planSummary?.steps.find((step) => !step.completed)?.step;
             return (
               <section
                 key={widget.key}
@@ -194,7 +228,12 @@ export function ExtensionWidgets({
                   {planSummary ? (
                     <div className="plan-widget-header">
                       <div className="plan-widget-title-group">
-                        <span className={`plan-widget-badge is-${planSummary.status}`}>{planSummary.statusLabel}</span>
+                        <span className={`plan-widget-badge is-${planSummary.status}`}>{t(planSummary.statusKey)}</span>
+                        {planSummary.hasWarning && (
+                          <span className="plan-widget-warning" title={t("chat.planVerifyWarning")}>
+                            ⚠
+                          </span>
+                        )}
                         <span className="plan-widget-key">{widget.key}</span>
                         {planSummary.total > 0 && (
                           <span className="plan-widget-progress-text">
@@ -210,46 +249,117 @@ export function ExtensionWidgets({
                           </span>
                         )}
                       </div>
-                      {onCommand && (
-                        <div className="plan-widget-actions">
-                          {planSummary.completed < planSummary.total && (
+                      <div className="plan-widget-actions">
+                        {showPlanActions && canRunPlan && (
+                          <>
                             <button
                               type="button"
                               className="plan-widget-action is-primary"
                               disabled={commandsDisabled}
-                              onClick={() => onCommand("/plan execute")}
+                              onClick={() => onCommand?.("/plan execute")}
                             >
-                              {planSummary.status === "executing" ? "▶ Continue" : "▶ Execute"}
+                              {t(planSummary.status === "executing" ? "chat.planAction.continue" : "chat.planAction.execute")}
                             </button>
-                          )}
-                          <button
-                            type="button"
-                            className="plan-widget-action"
-                            disabled={commandsDisabled}
-                            onClick={() => onCommand("/todos refine")}
-                          >
-                            ✎ Refine
-                          </button>
+                            <button
+                              type="button"
+                              className="plan-widget-action"
+                              disabled={commandsDisabled}
+                              title={t("chat.planAction.autoHint")}
+                              onClick={() => onCommand?.("/plan auto")}
+                            >
+                              {t("chat.planAction.auto")}
+                            </button>
+                          </>
+                        )}
+                        {showPlanActions && (
+                          <>
+                            <button
+                              type="button"
+                              className="plan-widget-action"
+                              disabled={commandsDisabled}
+                              onClick={() => onCommand?.("/todos refine")}
+                            >
+                              {t("chat.planAction.refine")}
+                            </button>
+                            <button
+                              type="button"
+                              className="plan-widget-action"
+                              disabled={commandsDisabled}
+                              title={t("chat.planAction.exportHint")}
+                              onClick={() => onCommand?.("/todos export")}
+                            >
+                              {t("chat.planAction.export")}
+                            </button>
+                          </>
+                        )}
+                        <button
+                          type="button"
+                          className="plan-widget-action is-icon"
+                          aria-expanded={tallPlanPanel}
+                          aria-label={t(tallPlanPanel ? "chat.planRestoreHeight" : "chat.planExpandHeight")}
+                          title={t(tallPlanPanel ? "chat.planRestoreHeight" : "chat.planExpandHeight")}
+                          onClick={() => setTallPlanPanel((prev) => !prev)}
+                        >
+                          {tallPlanPanel ? "⤡" : "⤢"}
+                        </button>
+                        {showPlanActions && (
                           <button
                             type="button"
                             className="plan-widget-action is-danger"
                             disabled={commandsDisabled}
-                            title="Delete plan"
-                            aria-label="Delete plan"
-                            onClick={() => onCommand("/todos clear")}
+                            title={t("chat.planAction.delete")}
+                            aria-label={t("chat.planAction.delete")}
+                            onClick={() => onCommand?.("/todos clear")}
                           >
                             🗑
                           </button>
-                        </div>
-                      )}
+                        )}
+                      </div>
                     </div>
                   ) : (
                     widget.key
                   )}
                 </div>
-                <pre className="extension-widget-content">
-                  <AnsiText text={formatExtensionWidgetContent(bodyLines)} />
-                </pre>
+                {planSummary && planSummary.steps.length > 0 ? (
+                  <ul className="plan-todo-list">
+                    {planSummary.steps.map((step) => (
+                      <li
+                        key={step.step}
+                        dir="auto"
+                        className={`plan-todo-item${step.completed ? " is-done" : ""}${step.step === nextPendingStep ? " is-next" : ""}`}
+                      >
+                        <button
+                          type="button"
+                          className="plan-todo-checkbox"
+                          disabled={!onCommand || commandsDisabled}
+                          aria-label={t("chat.planToggleStep", { step: step.step })}
+                          title={t("chat.planToggleStep", { step: step.step })}
+                          onClick={() => onCommand?.(`/todos toggle ${step.step}`)}
+                        >
+                          {step.completed ? "☑" : "☐"}
+                        </button>
+                        <span className="plan-todo-step-num">{step.step}.</span>
+                        <span className="plan-todo-step-text" dir="auto">{step.text}</span>
+                        {!step.completed && onCommand && (
+                          <button
+                            type="button"
+                            className="plan-todo-run-step"
+                            disabled={commandsDisabled}
+                            aria-label={t("chat.planRunStep", { step: step.step })}
+                            title={t("chat.planRunStep", { step: step.step })}
+                            onClick={() => onCommand(`/todos step ${step.step}`)}
+                          >
+                            ▶
+                          </button>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <pre className="extension-widget-content">
+                    <AnsiText text={formatExtensionWidgetContent(bodyLines)} />
+                  </pre>
+                )}
               </section>
             );
           })()}
@@ -321,7 +431,7 @@ export function ExtensionWidgets({
             );
           })}
         </div>
-        {children}
+        {typeof children === "function" ? children({ expandedWidgetKey: resolvedExpandedKey }) : children}
       </div>
     </>
   );

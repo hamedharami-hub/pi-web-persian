@@ -625,6 +625,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const slashCommandsLoadRef = useRef<Promise<SlashCommandInfo[] | null> | null>(null);
   const slashCommandsGenerationRef = useRef(0);
   const newSessionPromotedRef = useRef(false);
+  const pendingNewSessionLabelRef = useRef<string | null>(null);
   const newSessionModelOverrideRef = useRef<SelectedModel | null>(initialChoices?.model ?? null);
   const thinkingLevelOverrideRef = useRef<ConcreteThinkingLevel | null>(initialChoices?.thinkingLevel ?? null);
   const thinkingLevelPinsRef = useRef<Record<string, string>>({});
@@ -2095,6 +2096,9 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         agentRunningRef.current = true;
         setAgentRunning(true);
         setAgentPhase({ kind: "waiting_model" });
+        if (isNew && !newSessionPromotedRef.current && sessionIdRef.current) {
+          promoteNewSession(1, pendingNewSessionLabelRef.current ?? "(no messages)");
+        }
         // A retry's wait is over once its run starts, as pi's TUI shows it: the
         // successful auto_retry_end comes only with the retry's first complete
         // reply, which can stream for minutes.
@@ -2518,13 +2522,21 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           });
         }
         promptRequestStarted = true;
+        pendingNewSessionLabelRef.current = message;
         const queuedAck = await sendAgentCommand<{ queued?: boolean }>(sid, {
           type: "prompt",
           message,
           ...(piImages?.length ? { images: piImages } : {}),
         });
         if (queuedAck?.queued) dropOptimisticUserMessage();
-        const promotesSession = !silentStatusCommand || trimmedMessage === "/plan execute" || trimmedMessage === "/todos execute";
+        const promotesSession =
+          !silentStatusCommand
+          || trimmedMessage === "/plan execute"
+          || trimmedMessage === "/todos execute"
+          || trimmedMessage.startsWith("/plan auto")
+          || trimmedMessage.startsWith("/todos auto")
+          || trimmedMessage.startsWith("/todos step ")
+          || trimmedMessage === "/goal plan";
         if (promotesSession) promoteNewSession(1, message);
       } else if (session) {
         sentSessionId = session.id;

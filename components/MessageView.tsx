@@ -137,7 +137,7 @@ const SafeMarkdownBody = memo(function SafeMarkdownBody({ children, className, .
           color: "var(--text-muted)",
           cursor: "pointer",
           fontSize: 12,
-          textAlign: "left",
+          textAlign: "start",
         }}
       >
         ⚠ {t("i18n.largeMessageReveal", { size: formatMessageBytes(children.length) })}

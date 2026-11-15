@@ -74,6 +74,23 @@ export function proseDirection(text: string): ProseDirection {
   return result;
 }
 
+function stripNonProseSyntax(text: string): string {
+  const sample = text.length > MAX_COMPOSER_SAMPLE_CHARS
+    ? text.slice(0, MAX_COMPOSER_SAMPLE_CHARS)
+    : text;
+  // A URL, a code span, or a fenced block should not decide the direction of
+  // surrounding prose while drafting Markdown or rendering inline titles/menus.
+  return sample
+    .replace(/```[^\n]*\n[\s\S]*?```/g, " ")
+    .replace(/`+[^`\n]*`+/g, " ")
+    .replace(/(?:https?:\/\/|www\.)[^\s<>]+/gi, " ");
+}
+
+export function markdownProseDirection(text: string): ProseDirection {
+  const { rtl, latin } = countScripts(stripNonProseSyntax(text), MAX_PROSE_SAMPLE_CHARS);
+  return directionFromCounts(rtl, latin);
+}
+
 export function composerDirection(text: string): ProseDirection {
   if (text === lastComposerInput) return lastComposerOutput;
   // A leading ! is Pi's shell-command input, not prose; don't move its caret
@@ -83,17 +100,7 @@ export function composerDirection(text: string): ProseDirection {
     lastComposerOutput = "ltr";
     return "ltr";
   }
-  const sample = text.length > MAX_COMPOSER_SAMPLE_CHARS
-    ? text.slice(0, MAX_COMPOSER_SAMPLE_CHARS)
-    : text;
-  // A URL, a code span, or a fenced block at the start should not decide the
-  // direction of the surrounding prose while the user is drafting Markdown.
-  const withoutCode = sample
-    .replace(/```[^\n]*\n[\s\S]*?```/g, " ")
-    .replace(/`+[^`\n]*`+/g, " ")
-    .replace(/(?:https?:\/\/|www\.)[^\s<>]+/gi, " ");
-  const { rtl, latin } = countScripts(withoutCode, MAX_PROSE_SAMPLE_CHARS);
-  const result = directionFromCounts(rtl, latin);
+  const result = markdownProseDirection(text);
   lastComposerInput = text;
   lastComposerOutput = result;
   return result;

@@ -116,6 +116,14 @@ interface Props {
   cwd?: string | null;
   /** Files picked with the attach button, handled like files dropped onto the chat. Without it the button takes images only. */
   onAttachFiles?: (files: File[]) => void;
+  /** Compact mode pill surfaced while the touch keyboard hides the bottom status shelf. */
+  activeWorkflowHint?: {
+    planOn: boolean;
+    hasGoal: boolean;
+    disabled?: boolean;
+    onTogglePlan?: () => void;
+    onGoalClick?: () => void;
+  };
 }
 
 export interface ChatInputHandle {
@@ -735,6 +743,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
   draftKey,
   cwd,
   onAttachFiles,
+  activeWorkflowHint,
   compact = false,
 }: Props, ref) {
   const { t } = useI18n();
@@ -2594,6 +2603,32 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
           )}
           </div>
         </div>
+
+        {/* Compact workflow mode reminder visible while the touch keyboard hides the bottom shelf */}
+        {!compact && activeWorkflowHint && (
+          <div className="chat-keyboard-workflow-hint" role="status">
+            {activeWorkflowHint.planOn && (
+              <button
+                type="button"
+                className="chat-keyboard-workflow-pill is-plan"
+                disabled={activeWorkflowHint.disabled}
+                onClick={activeWorkflowHint.onTogglePlan}
+              >
+                {t("chat.planActiveHint")}
+              </button>
+            )}
+            {activeWorkflowHint.hasGoal && (
+              <button
+                type="button"
+                className="chat-keyboard-workflow-pill is-goal"
+                disabled={activeWorkflowHint.disabled}
+                onClick={activeWorkflowHint.onGoalClick}
+              >
+                {t("chat.goalActiveHint")}
+              </button>
+            )}
+          </div>
+        )}
 
         {/* Bash mode status label */}
         {bashMode && (

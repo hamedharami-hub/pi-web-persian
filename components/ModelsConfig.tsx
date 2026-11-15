@@ -72,6 +72,8 @@ import { providerBadgeLabel } from "./enabled-models-helpers";
 import { OAuthPastePanel } from "./OAuthPastePanel";
 import { ProviderIcon } from "./ProviderIcon";
 import { ProviderUsageSummary } from "./ProviderUsageSummary";
+import { GsbQuotaSummary, useGsbQuota, type GsbQuotaController } from "./GsbQuotaSummary";
+import { gsbSidebarBadgeText, gsbSidebarTooltip, isGsbProviderMatch } from "./gsb-quota-helpers";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -342,11 +344,12 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
 
 // ── Provider detail ───────────────────────────────────────────────────────────
 
-function ProviderDetail({ name, editingName, fallbackLabel, provider, onChange, onEditingNameChange, onRename, onDelete, onAddModels, enabledModels }: {
+function ProviderDetail({ name, editingName, fallbackLabel, provider, onChange, onEditingNameChange, onRename, onDelete, onAddModels, enabledModels, gsbQuota }: {
   name: string; editingName: string; fallbackLabel: string; provider: ProviderEntry;
   onChange: (p: ProviderEntry) => void; onEditingNameChange: (n: string) => void;
   onRename: (n: string) => void; onDelete: () => void;
   onAddModels: (models: DiscoveredModel[]) => void; enabledModels: EnabledModelsController;
+  gsbQuota?: GsbQuotaController;
 }) {
   const { t } = useI18n();
   const [discoveryState, setDiscoveryState] = useState<ModelDiscoveryState>({ phase: "idle" });
@@ -444,6 +447,8 @@ function ProviderDetail({ name, editingName, fallbackLabel, provider, onChange, 
         </ConfigDetailHeader>
         <EnabledModelsProviderSwitchNote providerId={name} controller={enabledModels} id={switchNoteId} />
       </div>
+
+      {gsbQuota && <GsbQuotaSummary controller={gsbQuota} />}
 
        <Field label={t("i18n.providerId")}>
         <TextInput value={editingName} onChange={onEditingNameChange} placeholder="provider-id" mono />
@@ -2316,6 +2321,10 @@ export function ModelsConfig({ onClose, embedded = false, cwd = null }: {
   };
   const activeOAuth = oauthProviders.filter((p) => p.loggedIn);
   const activeApiKey = apiKeyProviders.filter((p) => p.configured);
+  const gsbProviderId = providers.find(([id, entry]) => isGsbProviderMatch(id, entry.baseUrl, entry.name))?.[0] ?? null;
+  const gsbQuota = useGsbQuota(gsbProviderId);
+  const gsbBadgeText = gsbSidebarBadgeText(gsbQuota.report);
+  const gsbBadgeTitle = gsbSidebarTooltip(gsbQuota.report);
 
   // Resolve current detail
   const detailContent = (() => {
@@ -2347,6 +2356,7 @@ export function ModelsConfig({ onClose, embedded = false, cwd = null }: {
           onDelete={() => deleteProvider(selection.name)}
           onAddModels={(models) => addDiscoveredModels(selection.name, models)}
           enabledModels={enabledModels}
+          gsbQuota={selection.name === gsbProviderId ? gsbQuota : undefined}
         />
       );
     }
@@ -2437,6 +2447,9 @@ export function ModelsConfig({ onClose, embedded = false, cwd = null }: {
                       <ConfigSidebarText className="is-grow">
                         {customProviderLabel(pName, pData)}
                       </ConfigSidebarText>
+                      {pName === gsbProviderId && gsbBadgeText && (
+                        <span className="models-sidebar-badge" title={gsbBadgeTitle}>{gsbBadgeText}</span>
+                      )}
                       {scopeBadge(pName)}
                     </ConfigSidebarItem>
 

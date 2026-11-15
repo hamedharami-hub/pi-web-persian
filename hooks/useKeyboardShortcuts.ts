@@ -7,6 +7,7 @@ import { useEffect } from "react";
 // the global Esc listener in AppShell can call it without prop-drilling.
 // ---------------------------------------------------------------------------
 let globalAbortHandler: (() => void) | null = null;
+let globalWorkflowHandlers: { onTogglePlan?: () => void; onToggleTeam?: () => void } | null = null;
 
 /**
  * Register (or clear) the abort handler for the global Esc shortcut.
@@ -14,6 +15,42 @@ let globalAbortHandler: (() => void) | null = null;
  */
 export function registerAbortHandler(handler: (() => void) | null): void {
   globalAbortHandler = handler;
+}
+
+/**
+ * Register (or clear) workflow shortcut handlers (`/plan` toggle & `/team` toggle)
+ * for the active main ChatWindow.
+ */
+export function registerWorkflowShortcutHandlers(
+  handlers: { onTogglePlan?: () => void; onToggleTeam?: () => void } | null,
+): void {
+  globalWorkflowHandlers = handlers;
+}
+
+/**
+ * Dispatch Ctrl+Alt+P / Ctrl+Alt+T workflow toggles if registered and not
+ * already prevented. Returns whether a handler ran.
+ */
+export function handleGlobalWorkflowShortcut(event: {
+  key: string;
+  code?: string | null;
+  ctrlKey: boolean;
+  altKey: boolean;
+  defaultPrevented?: boolean;
+  preventDefault?: () => void;
+}): boolean {
+  if (event.defaultPrevented || !globalWorkflowHandlers) return false;
+  if (isPlanToggleShortcut(event) && globalWorkflowHandlers.onTogglePlan) {
+    event.preventDefault?.();
+    globalWorkflowHandlers.onTogglePlan();
+    return true;
+  }
+  if (isTeamToggleShortcut(event) && globalWorkflowHandlers.onToggleTeam) {
+    event.preventDefault?.();
+    globalWorkflowHandlers.onToggleTeam();
+    return true;
+  }
+  return false;
 }
 
 /**
@@ -50,15 +87,46 @@ export function handleGlobalEscape(event: KeyboardEvent): boolean {
  *   (Polish AltGr+N is `ń`), that `key` is the user's text: matching `code`
  *   alone would swallow it and open a session instead.
  */
+export function matchesCtrlAltLetter(
+  event: {
+    key: string;
+    code?: string | null;
+    ctrlKey: boolean;
+    altKey: boolean;
+  },
+  letter: string,
+  physicalCode: string,
+): boolean {
+  if (!event.ctrlKey || !event.altKey) return false;
+  if (event.key.toLowerCase() === letter.toLowerCase()) return true;
+  return event.key === "Dead" && event.code === physicalCode;
+}
+
 export function isNewSessionShortcut(event: {
   key: string;
   code?: string | null;
   ctrlKey: boolean;
   altKey: boolean;
 }): boolean {
-  if (!event.ctrlKey || !event.altKey) return false;
-  if (event.key.toLowerCase() === "n") return true;
-  return event.key === "Dead" && event.code === "KeyN";
+  return matchesCtrlAltLetter(event, "n", "KeyN");
+}
+
+export function isPlanToggleShortcut(event: {
+  key: string;
+  code?: string | null;
+  ctrlKey: boolean;
+  altKey: boolean;
+}): boolean {
+  return matchesCtrlAltLetter(event, "p", "KeyP");
+}
+
+export function isTeamToggleShortcut(event: {
+  key: string;
+  code?: string | null;
+  ctrlKey: boolean;
+  altKey: boolean;
+}): boolean {
+  return matchesCtrlAltLetter(event, "t", "KeyT");
 }
 
 // ---------------------------------------------------------------------------
@@ -104,7 +172,11 @@ export function useGlobalKeyboardShortcuts(
         if (!activeCwd || !onNewSession) return;
         e.preventDefault();
         onNewSession(activeCwd);
+        return;
       }
+
+      // ---- Ctrl+Alt+P / Ctrl+Alt+T: toggle plan / team workflow modes ----
+      if (handleGlobalWorkflowShortcut(e)) return;
     };
 
     window.addEventListener("keydown", handler);

@@ -179,6 +179,32 @@ test("auto-expands plan-todos widgets with inline progress and action controls",
   assert.match(html, /plan-widget-badge is-saved/);
   assert.match(html, /1\/4/);
   assert.match(html, /▶ Execute/);
+  assert.match(html, /⚡ Auto/);
+  assert.match(html, /↓ Save/);
   assert.match(html, /✎ Refine/);
   assert.match(html, /aria-label="Delete plan"/);
+  assert.match(html, /plan-todo-list/);
+  assert.match(html, /dir="auto"/);
+  assert.match(html, /plan-todo-checkbox/);
+  assert.match(html, /plan-todo-run-step/);
+  assert.match(html, /is-next/);
+});
+
+test("renders paused plan warning badge when widget reports unresolved shell error", () => {
+  const html = renderWidgets({
+    widgets: [{
+      key: "plan-todos",
+      lines: [
+        "EXECUTING (paused)",
+        "☑ 1. First step",
+        "☐ 2. Second step",
+        "⚠ Previous command failed",
+      ],
+      placement: "aboveEditor",
+    }],
+    onCommand: () => {},
+  });
+
+  assert.match(html, /plan-widget-warning/);
+  assert.match(html, /⚠ Previous command failed/);
 });

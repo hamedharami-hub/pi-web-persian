@@ -1,5 +1,5 @@
 "use client";
-import { registerAbortHandler } from "@/hooks/useKeyboardShortcuts";
+import { registerAbortHandler, registerWorkflowShortcutHandlers } from "@/hooks/useKeyboardShortcuts";
 import { isHiddenRelation, SIDE_BOUNDARY_MESSAGE_TYPE } from "@/lib/session-family";
 import Image from "next/image";
 import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
@@ -22,6 +22,7 @@ import { ChatInput, getUserMessageDraftImages, getUserMessageText, type ChatInpu
 import { ChatMinimap, useMessageRefs } from "./ChatMinimap";
 import { ExtensionStatusBar } from "./ExtensionStatusBar";
 import { AnsiText } from "./AnsiText";
+import { markdownProseDirection } from "@/lib/text-direction";
 import { useI18n } from "@/hooks/useI18n";
 import { phaseLabel } from "@/lib/chat-phase-label";
 import { useAgentSession, type AgentEndInfo, type NewSessionChoices, type NoticeItem } from "@/hooks/useAgentSession";
@@ -243,7 +244,7 @@ function ProcessDetailsGroup({ messageCount, toolCallCount, durationMs, cacheMis
           color: "var(--text-muted)",
           cursor: "pointer",
           fontSize: 12,
-          textAlign: "left",
+          textAlign: "start",
         }}
         title={expanded ? t("chat.collapseProcess") : t("chat.expandProcess")}
       >
@@ -494,10 +495,43 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
     playDoneSoundRef.current();
   }, [completionNotificationsEnabled, extensionDialog]);
 
-  // Register the abort handler for the global Esc shortcut
+  // Register the abort and workflow shortcut handlers for global keyboard shortcuts
   useEffect(() => {
     if (!panel) registerAbortHandler(sessionBusy ? handleAbort : null);
   }, [panel, sessionBusy, handleAbort]);
+
+  const commandsDisabled = sessionBusy || isStreaming || isCompacting || Boolean(editEntryId);
+  const sendStatusCommand = useCallback((command: string) => {
+    if (!commandsDisabled) {
+      void handleSend(command, undefined, { fromStatusBar: true });
+    }
+  }, [commandsDisabled, handleSend]);
+
+  useEffect(() => {
+    if (panel) return;
+    registerWorkflowShortcutHandlers({
+      onTogglePlan: () => sendStatusCommand("/plan"),
+      onToggleTeam: () => sendStatusCommand("/team"),
+    });
+    return () => registerWorkflowShortcutHandlers(null);
+  }, [panel, sendStatusCommand]);
+
+  const effectiveExtensionStatuses = isNew && extensionStatuses.length === 0
+    ? DEFAULT_NEW_SESSION_STATUSES
+    : extensionStatuses;
+
+  const activeWorkflowHint = useMemo(() => {
+    const planOn = effectiveExtensionStatuses.some((s) => s.key === "command:/plan" && /\bON\b/i.test(s.text));
+    const hasGoal = effectiveExtensionStatuses.some((s) => s.key === "command:/goal" && /Edit goal/i.test(s.text));
+    if (!planOn && !hasGoal) return undefined;
+    return {
+      planOn,
+      hasGoal,
+      disabled: commandsDisabled,
+      onTogglePlan: () => sendStatusCommand("/plan"),
+      onGoalClick: () => sendStatusCommand("/goal"),
+    };
+  }, [commandsDisabled, effectiveExtensionStatuses, sendStatusCommand]);
 
   // --- Lazy-load historical messages ---
   // Only render the last N messages initially. When the user scrolls to the
@@ -1021,6 +1055,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
       draftKey={session?.id ?? newSessionDraftKey ?? undefined}
       cwd={session?.cwd ?? newSessionCwd}
       onAttachFiles={onAttachFiles}
+      activeWorkflowHint={activeWorkflowHint}
     />
   );
 
@@ -1588,14 +1623,10 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
         )}
         {chatInputElement}
         <ExtensionStatusBar
-          statuses={isNew && extensionStatuses.length === 0 ? DEFAULT_NEW_SESSION_STATUSES : extensionStatuses}
+          statuses={effectiveExtensionStatuses}
           widgets={extensionWidgets}
-          onCommand={(command) => {
-            if (!editEntryId && !sessionBusy && !isStreaming && !isCompacting) {
-              void handleSend(command, undefined, { fromStatusBar: true });
-            }
-          }}
-          commandsDisabled={sessionBusy || isStreaming || isCompacting || Boolean(editEntryId)}
+          onCommand={sendStatusCommand}
+          commandsDisabled={commandsDisabled}
         />
       </div>
       {isEmptyNew && <div className="min-h-0 flex-1" />}
@@ -1921,13 +1952,16 @@ function ExtensionDialog({
             boxShadow: "0 12px 32px rgba(0,0,0,0.18)",
             color: "var(--text)",
             cursor: "pointer",
-            textAlign: "left",
+            textAlign: "start",
           }}
         >
           <span style={{ fontSize: 11, fontWeight: 650, color: "var(--accent)", flexShrink: 0 }}>
             {t("chat.extensionPending")}
           </span>
-          <span style={{ fontSize: 13, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, minWidth: 0 }}>
+          <span
+            dir={markdownProseDirection(stripAnsi(request.title))}
+            style={{ fontSize: 13, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, minWidth: 0, textAlign: "start" }}
+          >
             {stripAnsi(request.title)}
           </span>
           {summary && (
@@ -1965,7 +1999,12 @@ function ExtensionDialog({
           <div style={{ flex: 1, minWidth: 0 }}>
             {/* Pi's TUI shows the title verbatim, newlines included; select/input have no
                 separate message field, so extensions put multi-line text here. */}
-            <div style={{ color: "var(--text)", fontSize: 14, fontWeight: 650, lineHeight: 1.45, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{stripAnsi(request.title)}</div>
+            <div
+              dir={markdownProseDirection(stripAnsi(request.title))}
+              style={{ color: "var(--text)", fontSize: 14, fontWeight: 650, lineHeight: 1.45, whiteSpace: "pre-wrap", overflowWrap: "anywhere", textAlign: "start" }}
+            >
+              {stripAnsi(request.title)}
+            </div>
             <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 3, color: "var(--text-dim)", fontSize: 11, fontFamily: "var(--font-mono)" }}>
               <span>{t("chat.extensionRequest")}</span>
               <ExtensionWaitingCount count={waitingCount} />
@@ -2050,6 +2089,7 @@ function ExtensionDialog({
                   tabIndex={0}
                   data-extension-option
                   aria-label={stripAnsi(option)}
+                  dir={markdownProseDirection(stripAnsi(option))}
                   ref={index === 0 ? focusFirstOption : undefined}
                   onClick={() => onRespond(request, { value: option })}
                   onKeyDown={(event) => {
@@ -2065,7 +2105,7 @@ function ExtensionDialog({
                     background: "var(--bg-panel)",
                     color: "var(--text)",
                     cursor: "pointer",
-                    textAlign: "left",
+                    textAlign: "start",
                     fontSize: 13,
                     overflowWrap: "anywhere",
                     // Match the scroller's padding so keyboard navigation never parks the
@@ -2084,6 +2124,7 @@ function ExtensionDialog({
           {request.method === "input" && (
             <input
               autoFocus
+              dir="auto"
               value={value}
               placeholder={request.placeholder}
               onChange={(e) => setValue(e.target.value)}
@@ -2105,6 +2146,7 @@ function ExtensionDialog({
           {request.method === "editor" && (
             <textarea
               autoFocus
+              dir="auto"
               value={value}
               onChange={(e) => setValue(e.target.value)}
               onKeyDown={(e) => {
@@ -2120,9 +2162,9 @@ function ExtensionDialog({
                 color: "var(--text)",
                 outline: "none",
                 resize: "vertical",
-                fontSize: 13,
-                lineHeight: 1.55,
-                fontFamily: "var(--font-mono)",
+                fontSize: 13.5,
+                lineHeight: 1.6,
+                fontFamily: "var(--font-ui)",
               }}
             />
           )}
@@ -2234,7 +2276,7 @@ function ExtensionCustomPanel({
             boxShadow: "0 12px 32px rgba(0,0,0,0.18)",
             color: "var(--text)",
             cursor: "pointer",
-            textAlign: "left",
+            textAlign: "start",
           }}
         >
           <span style={{ fontSize: 11, fontWeight: 650, color: "var(--accent)", flexShrink: 0 }}>
