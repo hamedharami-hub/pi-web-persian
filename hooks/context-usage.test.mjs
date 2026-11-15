@@ -26,7 +26,9 @@ function setup() {
     agentRunningRef: { current: true }, sdkAgentActiveRef: { current: true }, rpcPromptPendingRef: { current: true },
     setContextUsage: (value) => writes.push(value),
     setLiveTotalActiveMs: (value) => activeWrites.push({ sessionId: value.sessionId, value: value.value }), agentStatusUrl,
+    AGENT_STATUS_TIMEOUT_MS: 8_000,
     fetch: (url) => { const request = Promise.withResolvers(); requests.push({ ...request, url }); return request.promise; },
+    fetchWithTimeout: (input, init) => context.fetch(input, init),
     syncLiveModel() {}, setIsCompacting() {}, setAutoCompactionEnabled() {}, setQueuedMessages() {},
     normalizeQueuedMessages: (value) => value, finishPromptWithoutStream: () => { throw new Error("busy run settled"); },
   });

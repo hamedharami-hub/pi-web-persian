@@ -59,10 +59,21 @@ function canonicalOrigin(value: string): string | null {
   }
 }
 
+function parseForwardedProto(request: Request): "http" | "https" | null {
+  const proto = request.headers.get("x-forwarded-proto")?.split(",", 1)[0]?.trim().toLowerCase();
+  return proto === "https" || proto === "http" ? proto : null;
+}
+
 function getRequestOrigin(request: Request): string | null {
   const requestUrl = new URL(request.url);
   const host = request.headers.get("host");
-  return host ? canonicalOrigin(`${requestUrl.protocol}//${host}`) : null;
+  if (!host) return null;
+  const trustForwardedProto =
+    process.env.PI_WEB_TRUST_PROXY === "1"
+    || request.headers.get("sec-fetch-site") === "same-origin";
+  const forwardedProto = trustForwardedProto ? parseForwardedProto(request) : null;
+  const protocol = forwardedProto ? `${forwardedProto}:` : requestUrl.protocol;
+  return canonicalOrigin(`${protocol}//${host}`);
 }
 
 function isPdfFileReadUrl(url: URL): boolean {
@@ -132,7 +143,7 @@ export function isApiRequestHostAllowed(
 function isProxyRewrittenSameOrigin(request: Request, origin: string): boolean {
   if (
     request.headers.get("sec-fetch-site") !== "same-origin"
-    || !request.headers.get("x-forwarded-proto")
+    || !parseForwardedProto(request)
   ) return false;
 
   const host = request.headers.get("host");

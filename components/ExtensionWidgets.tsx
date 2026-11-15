@@ -2,6 +2,7 @@
 
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { useI18n } from "@/hooks/useI18n";
+import { stripAnsi } from "@/lib/ansi";
 import { AnsiText } from "@/components/AnsiText";
 import type { ExtensionWidgetItem } from "@/lib/types";
 
@@ -33,10 +34,44 @@ export function getUpdatedExtensionWidgetKeys(
 }
 
 function getDefaultExpandedWidgetKey(widgets: ExtensionWidgetItem[]): string | null {
+  const planWidget = widgets.find((widget) => widget.key === "plan-todos" && widget.lines.length > 0);
+  if (planWidget) return planWidget.key;
   return widgets.find((widget) => {
     const lineCount = widget.lines.length;
     return lineCount > 1 && lineCount <= DEFAULT_EXPANDED_WIDGET_LINES;
   })?.key ?? null;
+}
+
+function parsePlanTodosSummary(lines: string[]) {
+  if (lines.length === 0) return null;
+  let completed = 0;
+  let total = 0;
+  for (let i = 1; i < lines.length; i += 1) {
+    const plain = stripAnsi(lines[i]).trim();
+    if (!plain) continue;
+    if (plain.startsWith("☑")) {
+      completed += 1;
+      total += 1;
+    } else if (plain.startsWith("☐")) {
+      total += 1;
+    }
+  }
+  const headerText = stripAnsi(lines[0]).replace(/\s*—\s*\/todos\s*$/i, "").trim();
+  const status = /^EXECUTING/i.test(headerText)
+    ? "executing"
+    : /^PLANNING/i.test(headerText)
+      ? "planning"
+      : /^COMPLETE/i.test(headerText)
+        ? "complete"
+        : "saved";
+  const statusLabel = status === "executing"
+    ? "Executing"
+    : status === "planning"
+      ? "Planning"
+      : status === "complete"
+        ? "Marked done"
+        : "Plan ready";
+  return { completed, total, status, statusLabel };
 }
 
 export function getNextExpandedWidgetKey(
@@ -50,7 +85,17 @@ export function getNextExpandedWidgetKey(
  * `children` (the status line) joins the triggers in one row, so the whole row
  * scrolls sideways together; the expanded panel stays above it, out of the scroll.
  */
-export function ExtensionWidgets({ widgets, children }: { widgets: ExtensionWidgetItem[]; children?: ReactNode }) {
+export function ExtensionWidgets({
+  widgets,
+  onCommand,
+  commandsDisabled = false,
+  children,
+}: {
+  widgets: ExtensionWidgetItem[];
+  onCommand?: (command: string) => void;
+  commandsDisabled?: boolean;
+  children?: ReactNode;
+}) {
   const { t } = useI18n();
   const idPrefix = useId();
   const previousContentsRef = useRef<Map<string, string[]> | null>(null);
@@ -63,12 +108,22 @@ export function ExtensionWidgets({ widgets, children }: { widgets: ExtensionWidg
   );
 
   useEffect(() => {
+    const prevContents = previousContentsRef.current;
     const nextContents = snapshotExtensionWidgetContents(widgets);
     const updatedKeys = getUpdatedExtensionWidgetKeys(
-      previousContentsRef.current,
+      prevContents,
       nextContents,
     );
     previousContentsRef.current = nextContents;
+
+    if (
+      prevContents !== null
+      && !prevContents.has("plan-todos")
+      && nextContents.has("plan-todos")
+      && (nextContents.get("plan-todos")?.length ?? 0) > 0
+    ) {
+      setExpandedWidgetKey("plan-todos");
+    }
 
     for (const [key, timer] of updateClearTimersRef.current) {
       if (nextContents.has(key)) continue;
@@ -126,16 +181,74 @@ export function ExtensionWidgets({ widgets, children }: { widgets: ExtensionWidg
             const index = widgets.indexOf(widget);
             const triggerId = `${idPrefix}-trigger-${index}`;
             const panelId = `${idPrefix}-panel-${index}`;
+            const planSummary = widget.key === "plan-todos" ? parsePlanTodosSummary(widget.lines) : null;
+            const bodyLines = planSummary && widget.lines.length > 1 ? widget.lines.slice(1) : widget.lines;
             return (
               <section
                 key={widget.key}
                 id={panelId}
-                className="extension-widget-panel"
+                className={`extension-widget-panel${planSummary ? " is-plan-todos" : ""}`}
                 aria-labelledby={triggerId}
               >
-                <div className="extension-widget-panel-heading">{widget.key}</div>
+                <div className="extension-widget-panel-heading">
+                  {planSummary ? (
+                    <div className="plan-widget-header">
+                      <div className="plan-widget-title-group">
+                        <span className={`plan-widget-badge is-${planSummary.status}`}>{planSummary.statusLabel}</span>
+                        <span className="plan-widget-key">{widget.key}</span>
+                        {planSummary.total > 0 && (
+                          <span className="plan-widget-progress-text">
+                            {planSummary.completed}/{planSummary.total}
+                          </span>
+                        )}
+                        {planSummary.total > 0 && (
+                          <span className="plan-widget-progress-bar" aria-hidden="true">
+                            <span
+                              className="plan-widget-progress-fill"
+                              style={{ width: `${Math.round((planSummary.completed / planSummary.total) * 100)}%` }}
+                            />
+                          </span>
+                        )}
+                      </div>
+                      {onCommand && (
+                        <div className="plan-widget-actions">
+                          {planSummary.completed < planSummary.total && (
+                            <button
+                              type="button"
+                              className="plan-widget-action is-primary"
+                              disabled={commandsDisabled}
+                              onClick={() => onCommand("/plan execute")}
+                            >
+                              {planSummary.status === "executing" ? "▶ Continue" : "▶ Execute"}
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            className="plan-widget-action"
+                            disabled={commandsDisabled}
+                            onClick={() => onCommand("/todos refine")}
+                          >
+                            ✎ Refine
+                          </button>
+                          <button
+                            type="button"
+                            className="plan-widget-action is-danger"
+                            disabled={commandsDisabled}
+                            title="Delete plan"
+                            aria-label="Delete plan"
+                            onClick={() => onCommand("/todos clear")}
+                          >
+                            🗑
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    widget.key
+                  )}
+                </div>
                 <pre className="extension-widget-content">
-                  <AnsiText text={formatExtensionWidgetContent(widget.lines)} />
+                  <AnsiText text={formatExtensionWidgetContent(bodyLines)} />
                 </pre>
               </section>
             );

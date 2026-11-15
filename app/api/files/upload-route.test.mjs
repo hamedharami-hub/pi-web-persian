@@ -38,6 +38,30 @@ async function upload(directory, strategy = "overwrite", names = ["important.txt
   }), { params: Promise.resolve({ path: encoded.split("/").map(decodeURIComponent) }) });
 }
 
+// Exercise real multipart parsing and disk writes, not mocked file sizes.
+for (const size of [100 * 1024 * 1024, 100 * 1024 * 1024 + 1]) {
+  test(`APK upload boundary: ${size} bytes`, async () => {
+    const { directory } = fixture();
+    const encoded = encodeFilePathForApi(directory);
+    const form = new FormData();
+    form.append("files", new File([new Uint8Array(size)], "app.apk", {
+      type: "application/vnd.android.package-archive",
+    }));
+    const response = await POST(new NextRequest(`http://localhost/api/files/${encoded}?type=upload`, {
+      method: "POST", headers: { host: "localhost" }, body: form,
+    }), { params: Promise.resolve({ path: encoded.split("/").map(decodeURIComponent) }) });
+    if (size === 100 * 1024 * 1024) {
+      assert.equal(response.status, 200);
+      assert.deepEqual((await response.json()).uploaded, ["app.apk"]);
+      assert.equal(fs.statSync(path.join(directory, "app.apk")).size, size);
+    } else {
+      assert.equal(response.status, 413);
+      assert.equal((await response.json()).error, "Each upload must be 100MB or smaller");
+      assert.equal(fs.existsSync(path.join(directory, "app.apk")), false);
+    }
+  });
+}
+
 for (const partial of [false, true]) {
   test(`failed overwrite preserves original and cleans staging (partial write: ${partial})`, async (t) => {
     const { directory, destination } = fixture();

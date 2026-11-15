@@ -68,9 +68,12 @@ export async function POST(req: Request) {
     allowFileRoot(cwd);
     invalidateSessionListCache();
 
+    await session.waitUntilReady();
     const state = await session.send({ type: "get_state" }) as {
       model?: { id: string; provider: string };
       thinkingLevel?: string;
+      extensionStatuses?: Array<{ key: string; text: string }>;
+      extensionWidgets?: Array<{ key: string; lines: string[]; placement?: string }>;
     };
 
     if (promptCommand.type === "ensure_session") {
@@ -82,6 +85,8 @@ export async function POST(req: Request) {
           ? { provider: state.model.provider, modelId: state.model.id }
           : null,
         thinkingLevel: state.thinkingLevel,
+        extensionStatuses: state.extensionStatuses ?? [],
+        extensionWidgets: state.extensionWidgets ?? [],
       });
     }
 
@@ -96,6 +101,8 @@ export async function POST(req: Request) {
         ? { provider: state.model.provider, modelId: state.model.id }
         : null,
       thinkingLevel: state.thinkingLevel,
+      extensionStatuses: state.extensionStatuses ?? [],
+      extensionWidgets: state.extensionWidgets ?? [],
     });
   } catch (error) {
     return NextResponse.json({

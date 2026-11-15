@@ -4,7 +4,7 @@ import { isHiddenRelation, SIDE_BOUNDARY_MESSAGE_TYPE } from "@/lib/session-fami
 import Image from "next/image";
 import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import type { AgentMessage, AssistantContentBlock, AssistantMessage, BashExecutionMessage, BlockingExtensionUiRequest, ExtensionUiRequest, SessionInfo, SessionTreeNode, ToolResultMessage } from "@/lib/types";
+import type { AgentMessage, AssistantContentBlock, AssistantMessage, BashExecutionMessage, BlockingExtensionUiRequest, ExtensionStatusItem, ExtensionUiRequest, SessionInfo, SessionTreeNode, ToolResultMessage } from "@/lib/types";
 import { normalizeCustomPanelLines, stripAnsi } from "@/lib/ansi";
 import { splitNoticeText } from "@/lib/notice-text";
 import { EXTENSION_DIALOG_BASE_WIDTH, fitExtensionDialogWidth } from "@/lib/extension-dialog-fit";
@@ -102,6 +102,13 @@ interface Props {
 }
 const CHAT_MINIMAP_WIDTH = 36;
 const CHAT_COLUMN_PADDING = 16;
+
+const DEFAULT_NEW_SESSION_STATUSES: ExtensionStatusItem[] = [
+  { key: "command:/agents", text: "🤖 Team OFF" },
+  { key: "command:/goal", text: "◎ Set goal" },
+  { key: "command:/plan", text: "Plan OFF · toggle" },
+  { key: "command:/todos", text: "📋 Todos" },
+];
 
 // One update check per page. Every fresh composer mounts the header again
 // (each move of the new-session bar does), and a link that turned up late
@@ -306,7 +313,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
     dismissCompactError,
     handleRecallQueue,
     handleBuiltinSlashCommand,
-    handleToolPresetChange, handleThinkingLevelChange, handleSetDefaultModel, handleSetDefaultThinkingLevel, loadSlashCommands, loadAllModels, scrollUserMsgToTop,
+    handleToolPresetChange, handleThinkingLevelChange, handleSetDefaultModel, handleSetDefaultThinkingLevel, loadSlashCommands, loadAllModels, reloadSession, scrollUserMsgToTop,
     loadContext, activeLeafId, scrollToBottom, scrollToMessage,
   } = useAgentSession({
     session, sessionRunning, newSessionCwd, newSessionDraftKey, initialNewSessionChoices, onNewSessionChoicesChange, onAgentEnd: wrappedOnAgentEnd, onToolEnd, onAttentionNeeded, onSessionCreated, onSessionForked, onSideSession,
@@ -837,7 +844,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
     setVisibleCount((current) => Math.max(current, messages.length * 2));
   }, [messages.length]);
 
-  const isEmptyNew = isNew && messages.length === 0 && !isStreaming && !sessionBusy;
+  const isEmptyNew = isNew && messages.length === 0 && !isStreaming && (!sessionBusy || agentPhase?.kind === "running_command");
   useScrollbarVisibility(scrollContainerRef, Boolean(session?.id) || !isEmptyNew);
   const messageCwd = session?.cwd ?? newSessionCwd ?? undefined;
   const promptAnchorSpacerRef = useRef<HTMLDivElement | null>(null);
@@ -1013,8 +1020,23 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
 
   if (error) {
     return (
-      <div className="flex h-full items-center justify-center text-red-400">
-        {error}
+      <div role="alert" className="flex h-full flex-col items-center justify-center gap-3 px-4 text-center text-red-400">
+        <div>{error}</div>
+        <button
+          type="button"
+          onClick={() => (reloadSession ? reloadSession() : window.location.reload())}
+          style={{
+            padding: "6px 14px",
+            borderRadius: 6,
+            border: "1px solid var(--border)",
+            background: "var(--bg)",
+            color: "var(--text)",
+            fontSize: 12,
+            cursor: "pointer",
+          }}
+        >
+          {t("sessionPanel.retry")}
+        </button>
       </div>
     );
   }
@@ -1533,10 +1555,12 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
         )}
         {chatInputElement}
         <ExtensionStatusBar
-          statuses={extensionStatuses}
+          statuses={isNew && extensionStatuses.length === 0 ? DEFAULT_NEW_SESSION_STATUSES : extensionStatuses}
           widgets={extensionWidgets}
           onCommand={(command) => {
-            if (!editEntryId && !sessionBusy && !isStreaming && !isCompacting) void handleSend(command);
+            if (!editEntryId && !sessionBusy && !isStreaming && !isCompacting) {
+              void handleSend(command, undefined, { fromStatusBar: true });
+            }
           }}
           commandsDisabled={sessionBusy || isStreaming || isCompacting || Boolean(editEntryId)}
         />

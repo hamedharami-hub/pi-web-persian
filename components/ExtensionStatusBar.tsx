@@ -43,6 +43,23 @@ type StatusCell =
   | { kind: "text"; text: string }
   | { kind: "command"; command: string; label: string };
 
+type StatusCellVariant = "active" | "primary" | "danger" | "subtle";
+
+function getStatusCellVariant(cell: StatusCell): StatusCellVariant | undefined {
+  if (cell.kind !== "command") return undefined;
+  if (cell.command === "/plan execute") return "primary";
+  if (cell.command === "/todos clear" || cell.command === "/goal clear") return "danger";
+  if (
+    (cell.command === "/plan" && /\bON\b/i.test(cell.label))
+    || (cell.command === "/agents" && /\bON\b/i.test(cell.label))
+    || (cell.command === "/goal" && /Edit goal/i.test(cell.label))
+  ) {
+    return "active";
+  }
+  if (cell.command === "/todos refine" || cell.command === "/todos") return "subtle";
+  return undefined;
+}
+
 /** One cell per status, in key order. A status with nothing visible to show has no cell. */
 export function buildExtensionStatusCells(statuses: ExtensionStatusItem[]): StatusCell[] {
   const cells: StatusCell[] = [];
@@ -96,6 +113,7 @@ export function ExtensionStatusBar({
             key={index}
             type="button"
             className="extension-status-item extension-status-command"
+            data-variant={getStatusCellVariant(cell)}
             disabled={!onCommand || commandsDisabled}
             title={`${cell.label} · ${cell.command}`}
             aria-label={`${cell.label} (${cell.command})`}
@@ -112,7 +130,11 @@ export function ExtensionStatusBar({
     <div
       className={`extension-status-shelf${widgets.length > 0 ? " has-widgets" : ""}${cells.length > 0 ? " has-status" : ""}${hasCommands ? " has-commands" : ""}`}
     >
-      {widgets.length > 0 ? <ExtensionWidgets widgets={widgets}>{statusLine}</ExtensionWidgets> : statusLine}
+      {widgets.length > 0 ? (
+        <ExtensionWidgets widgets={widgets} onCommand={onCommand} commandsDisabled={commandsDisabled}>
+          {statusLine}
+        </ExtensionWidgets>
+      ) : statusLine}
     </div>
   );
 }

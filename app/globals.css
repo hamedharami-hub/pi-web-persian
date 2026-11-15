@@ -912,14 +912,14 @@ html[data-keyboard-open] .terminal-extra-keys {
   align-items: stretch;
   min-width: 0;
   border-top: 1px solid var(--border);
-  background: transparent;
+  background: color-mix(in srgb, var(--bg-panel) 55%, var(--bg));
 }
 
 .extension-widget-panels {
   display: flex;
   flex: 0 0 100%;
   flex-direction: column;
-  max-height: min(144px, 18dvh);
+  max-height: min(176px, 23dvh);
   overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
@@ -947,6 +947,156 @@ html[data-keyboard-open] .terminal-extra-keys {
   white-space: nowrap;
 }
 
+.extension-widget-panel.is-plan-todos .extension-widget-panel-heading {
+  height: auto;
+  min-height: 34px;
+  padding: 6px 12px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 68%, transparent);
+  background: color-mix(in srgb, var(--bg-panel) 78%, var(--bg));
+  font-family: var(--font-ui);
+  white-space: normal;
+}
+
+.plan-widget-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.plan-widget-title-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.plan-widget-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.3;
+  background: var(--bg-subtle);
+  color: var(--text-muted);
+  border: 1px solid color-mix(in srgb, var(--border) 85%, transparent);
+}
+
+.plan-widget-badge.is-executing {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  color: var(--accent);
+}
+
+.plan-widget-badge.is-planning {
+  background: color-mix(in srgb, #d97706 14%, transparent);
+  border-color: color-mix(in srgb, #d97706 42%, transparent);
+  color: #b45309;
+}
+
+html.dark .plan-widget-badge.is-planning,
+[data-theme="dark"] .plan-widget-badge.is-planning {
+  color: #fbbf24;
+}
+
+.plan-widget-badge.is-complete {
+  background: color-mix(in srgb, #16a34a 14%, transparent);
+  border-color: color-mix(in srgb, #16a34a 42%, transparent);
+  color: #15803d;
+}
+
+html.dark .plan-widget-badge.is-complete,
+[data-theme="dark"] .plan-widget-badge.is-complete {
+  color: #4ade80;
+}
+
+.plan-widget-key {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.plan-widget-progress-text {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.plan-widget-progress-bar {
+  position: relative;
+  display: inline-block;
+  width: 64px;
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--border) 85%, transparent);
+}
+
+.plan-widget-progress-fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--accent);
+  transition: width 180ms ease;
+}
+
+.plan-widget-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+}
+
+.plan-widget-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 9px;
+  border: 1px solid color-mix(in srgb, var(--border) 90%, transparent);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: 11.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
+}
+
+.plan-widget-action:hover:not(:disabled) {
+  background: var(--bg-hover);
+  border-color: var(--text-dim);
+}
+
+.plan-widget-action.is-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-contrast, #ffffff);
+  font-weight: 600;
+}
+
+.plan-widget-action.is-primary:hover:not(:disabled) {
+  background: var(--accent-hover, var(--accent));
+  border-color: var(--accent-hover, var(--accent));
+}
+
+.plan-widget-action.is-danger:hover:not(:disabled) {
+  background: color-mix(in srgb, #dc2626 12%, var(--bg));
+  border-color: color-mix(in srgb, #dc2626 48%, transparent);
+  color: #dc2626;
+}
+
+.plan-widget-action:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 /* The widget triggers and the status line are one row that scrolls sideways as a
    whole. The expanded panel sits above it and stays put. */
 .extension-status-row {
@@ -964,7 +1114,7 @@ html[data-keyboard-open] .terminal-extra-keys {
   display: flex;
   flex: 0 0 auto;
   align-items: stretch;
-  height: 35px;
+  height: 38px;
 }
 
 .extension-status-shelf.has-widgets.has-status .extension-widget-triggers {
@@ -981,7 +1131,7 @@ html[data-keyboard-open] .terminal-extra-keys {
   flex: 0 0 108px;
   align-items: center;
   width: 108px;
-  height: 35px;
+  height: 38px;
   gap: 5px;
   padding: 0 7px;
   overflow: hidden;
@@ -1096,9 +1246,9 @@ button.extension-widget-trigger:focus-visible {
 .extension-status-line {
   display: flex;
   flex: 1 1 0;
-  align-items: flex-start;
+  align-items: center;
   min-width: 0;
-  min-height: 35px;
+  min-height: 38px;
   max-height: min(144px, 18dvh);
   padding: 0;
   overflow: auto;
@@ -1110,46 +1260,88 @@ button.extension-widget-trigger:focus-visible {
 .extension-status-text {
   display: flex;
   flex: 1;
-  align-items: stretch;
+  align-items: center;
+  gap: 6px;
   min-width: 0;
-  min-height: 35px;
+  min-height: 38px;
+  padding: 4px 8px;
   color: var(--text-muted);
-  font-family: var(--font-mono);
-  font-size: 11px;
-  line-height: 1.45;
+  font-family: var(--font-ui);
+  font-size: 11.5px;
+  line-height: 1.35;
   white-space: pre;
 }
 
-/* Every status is a cell of the status line, told apart from its neighbours by a
-   vertical rule like the widget triggers. A `command:` status is a button cell, as
-   tall as the line, so the whole cell can be clicked. */
+/* Status chips and command pills aligned cleanly along the toolbar shelf. */
 .extension-status-item {
-  display: flex;
+  display: inline-flex;
   flex: 0 0 auto;
   align-items: center;
-  padding: 8px 12px;
-  border-right: 1px solid color-mix(in srgb, var(--border) 78%, transparent);
-}
-
-.extension-status-item:last-child {
-  border-right: 0;
+  min-height: 27px;
+  padding: 4px 10px;
+  border: 1px solid color-mix(in srgb, var(--border) 78%, transparent);
+  border-radius: 7px;
+  background: var(--bg);
 }
 
 .extension-status-command {
-  border-top: 0;
-  border-bottom: 0;
-  border-left: 0;
-  background: transparent;
+  background: var(--bg);
   color: var(--text);
   font: inherit;
-  line-height: 1.45;
+  font-weight: 500;
+  line-height: 1.35;
   white-space: nowrap;
   cursor: pointer;
-  transition: background 0.12s, color 0.12s;
+  transition: background 0.12s, border-color 0.12s, color 0.12s, box-shadow 0.12s;
 }
 
 .extension-status-command:hover:not(:disabled) {
   background: var(--bg-hover);
+  border-color: var(--text-dim);
+}
+
+.extension-status-command[data-variant="active"] {
+  background: color-mix(in srgb, var(--accent) 13%, var(--bg));
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.extension-status-command[data-variant="active"]:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 20%, var(--bg));
+  border-color: var(--accent);
+}
+
+.extension-status-command[data-variant="primary"] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-contrast, #ffffff);
+  font-weight: 600;
+}
+
+.extension-status-command[data-variant="primary"]:hover:not(:disabled) {
+  background: var(--accent-hover, var(--accent));
+  border-color: var(--accent-hover, var(--accent));
+}
+
+.extension-status-command[data-variant="danger"] {
+  color: var(--text-muted);
+}
+
+.extension-status-command[data-variant="danger"]:hover:not(:disabled) {
+  background: color-mix(in srgb, #dc2626 12%, var(--bg));
+  border-color: color-mix(in srgb, #dc2626 48%, transparent);
+  color: #dc2626;
+}
+
+.extension-status-command[data-variant="subtle"] {
+  color: var(--text-muted);
+  background: transparent;
+}
+
+.extension-status-command[data-variant="subtle"]:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text);
 }
 
 .extension-status-command:focus-visible {
@@ -1167,6 +1359,10 @@ button.extension-widget-trigger:focus-visible {
 @media (pointer: coarse) {
   .extension-status-shelf.has-commands .extension-status-text {
     min-height: 44px;
+  }
+
+  .extension-status-shelf.has-commands .extension-status-item {
+    min-height: 34px;
   }
 
   .extension-status-shelf.has-commands .extension-widget-triggers,

@@ -157,3 +157,28 @@ test("keeps empty widgets non-interactive", () => {
   assert.doesNotMatch(html, /aria-expanded/);
   assert.match(html, /title="empty-widget - Above editor widget"/);
 });
+
+test("auto-expands plan-todos widgets with inline progress and action controls", () => {
+  const html = renderWidgets({
+    widgets: [{
+      key: "plan-todos",
+      lines: [
+        "SAVED (not executing) — /todos",
+        "☑ 1. First step",
+        "☐ 2. Second step",
+        "☐ 3. Third step",
+        "☐ 4. Fourth step",
+      ],
+      placement: "aboveEditor",
+    }],
+    onCommand: () => {},
+  });
+
+  assert.match(html, /aria-expanded="true"/);
+  assert.match(html, /plan-widget-header/);
+  assert.match(html, /plan-widget-badge is-saved/);
+  assert.match(html, /1\/4/);
+  assert.match(html, /▶ Execute/);
+  assert.match(html, /✎ Refine/);
+  assert.match(html, /aria-label="Delete plan"/);
+});

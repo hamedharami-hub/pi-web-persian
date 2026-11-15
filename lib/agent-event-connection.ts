@@ -58,6 +58,7 @@ export interface AgentEventConnectionOptions {
 }
 
 const EVENT_SOURCE_OPEN = 1;
+const EVENT_SOURCE_CLOSED = 2;
 
 /** Owns the EventSource, agent-readiness handshake, and passive reconnect. */
 export class AgentEventConnection {
@@ -104,6 +105,33 @@ export class AgentEventConnection {
       lastError: this.lastError ? { ...this.lastError } : null,
       lastClose: this.lastClose ? { ...this.lastClose } : null,
     };
+  }
+
+  checkHealth(sessionId: string, maxSilentMs: number): boolean {
+    if (!this.options.shouldMaintain(sessionId)) return false;
+    const now = Date.now();
+    const conn = this.current;
+    if (conn && conn.sessionId === sessionId) {
+      const isClosed = conn.source.readyState === EVENT_SOURCE_CLOSED;
+      const lastActivityAt = conn.attempt.ready ? (conn.lastSeenAt ?? conn.openedAt) : conn.openedAt;
+      const isStale = now - lastActivityAt > maxSilentMs;
+      if (!conn.attempt.ready) {
+        if (!isClosed && !isStale) return false;
+      } else if (conn.source.readyState === EVENT_SOURCE_OPEN && !isStale) {
+        return false;
+      }
+      if (isStale) {
+        this.lastError = { reason: "stale", message: null, at: now };
+      } else if (isClosed) {
+        this.lastError = { reason: "error", message: null, at: now };
+      } else {
+        this.lastClose = { reason: "stuck", at: now };
+      }
+      this.discard(conn, new AgentEventConnectionError("closed"));
+    }
+    this.stopRetrying();
+    this.maintain(sessionId);
+    return true;
   }
 
   maintain(sessionId: string): void {
