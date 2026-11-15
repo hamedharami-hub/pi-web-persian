@@ -195,10 +195,9 @@ test("renders paused plan warning badge when widget reports unresolved shell err
     widgets: [{
       key: "plan-todos",
       lines: [
-        "EXECUTING (paused)",
+        "EXECUTING (paused) · ⚠ bash failed — /todos",
         "☑ 1. First step",
         "☐ 2. Second step",
-        "⚠ Previous command failed",
       ],
       placement: "aboveEditor",
     }],
@@ -206,5 +205,6 @@ test("renders paused plan warning badge when widget reports unresolved shell err
   });
 
   assert.match(html, /plan-widget-warning/);
-  assert.match(html, /⚠ Previous command failed/);
+  assert.match(html, /⚠/);
+  assert.match(html, /▶ Continue/);
 });

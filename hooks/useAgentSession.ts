@@ -644,9 +644,11 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   // started in: only a read started after the run settled can settle it.
   const sessionReadSeqRef = useRef(0);
   const lastReadContextRef = useRef<{ sid: string; seq: number; messages: AgentMessage[]; entryIds: string[] } | null>(null);
+  const promotePendingNewSessionRef = useRef<(() => void) | null>(null);
   const markPromptLanded = useCallback(() => {
     landedPromptRunIdRef.current = promptRunIdRef.current;
     if (unconfirmedSendRef.current?.runId === promptRunIdRef.current) unconfirmedSendRef.current = null;
+    if (agentRunningRef.current) promotePendingNewSessionRef.current?.();
   }, []);
   const modelSwitchPendingRef = useRef(false);
   const draftKeyAliasesRef = useRef(new Map<string, string>());
@@ -1151,6 +1153,11 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       transient: true,
     }, provisionalDraftKey);
   }, [isNew, newSessionCwd, newSessionDraftKey, onSessionCreated, opts.chatInputRef]);
+  promotePendingNewSessionRef.current = () => {
+    if (isNew && !newSessionPromotedRef.current && sessionIdRef.current) {
+      promoteNewSession(1, pendingNewSessionLabelRef.current ?? "(no messages)");
+    }
+  };
 
   // The model and reasoning level a fresh composer's session started with, unless the user
   // picked others since `selectedModel` / `selectedThinkingLevel` were read.
@@ -2090,15 +2097,12 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         break;
       case "agent_start":
         if (runTranscriptBaselineRef.current?.runId === promptRunIdRef.current) runTranscriptBaselineRef.current.modelStarted = true;
-        markPromptLanded();
         cancelEventStreamGrace();
         sdkAgentActiveRef.current = true;
         agentRunningRef.current = true;
+        markPromptLanded();
         setAgentRunning(true);
         setAgentPhase({ kind: "waiting_model" });
-        if (isNew && !newSessionPromotedRef.current && sessionIdRef.current) {
-          promoteNewSession(1, pendingNewSessionLabelRef.current ?? "(no messages)");
-        }
         // A retry's wait is over once its run starts, as pi's TUI shows it: the
         // successful auto_retry_end comes only with the retry's first complete
         // reply, which can stream for minutes.

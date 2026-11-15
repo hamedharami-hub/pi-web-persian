@@ -1625,7 +1625,11 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
         <ExtensionStatusBar
           statuses={effectiveExtensionStatuses}
           widgets={extensionWidgets}
-          onCommand={sendStatusCommand}
+          onCommand={(command) => {
+            if (!sessionBusy && !isStreaming && !isCompacting && !editEntryId) {
+              void handleSend(command, undefined, { fromStatusBar: true });
+            }
+          }}
           commandsDisabled={commandsDisabled}
         />
       </div>

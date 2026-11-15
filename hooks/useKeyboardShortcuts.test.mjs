@@ -91,3 +91,87 @@ test("a KeyboardEvent without a code still matches by key", () => {
   assert.equal(shortcut({ key: "n", code: "" }), true);
   assert.equal(shortcut({ key: "Dead", code: "" }), false);
 });
+
+const {
+  isPlanToggleShortcut,
+  isTeamToggleShortcut,
+  registerWorkflowShortcutHandlers,
+  handleGlobalWorkflowShortcut,
+} = await import("./useKeyboardShortcuts.ts");
+
+test("isPlanToggleShortcut and isTeamToggleShortcut handle Ctrl+Alt, Dead keys, and AltGr text", () => {
+  assert.equal(isPlanToggleShortcut({ key: "p", code: "KeyP", ctrlKey: true, altKey: true }), true);
+  assert.equal(isPlanToggleShortcut({ key: "Dead", code: "KeyP", ctrlKey: true, altKey: true }), true);
+  assert.equal(isPlanToggleShortcut({ key: "π", code: "KeyP", ctrlKey: true, altKey: true }), false);
+  assert.equal(isPlanToggleShortcut({ key: "p", code: "KeyP", ctrlKey: true, altKey: false }), false);
+
+  assert.equal(isTeamToggleShortcut({ key: "t", code: "KeyT", ctrlKey: true, altKey: true }), true);
+  assert.equal(isTeamToggleShortcut({ key: "Dead", code: "KeyT", ctrlKey: true, altKey: true }), true);
+  assert.equal(isTeamToggleShortcut({ key: "þ", code: "KeyT", ctrlKey: true, altKey: true }), false);
+  assert.equal(isTeamToggleShortcut({ key: "t", code: "KeyT", ctrlKey: false, altKey: true }), false);
+});
+
+test("registerWorkflowShortcutHandlers dispatches plan and team toggles and respects defaultPrevented", () => {
+  let planCalls = 0;
+  let teamCalls = 0;
+  let prevented = 0;
+
+  registerWorkflowShortcutHandlers({
+    onTogglePlan: () => { planCalls++; },
+    onToggleTeam: () => { teamCalls++; },
+  });
+
+  try {
+    assert.equal(
+      handleGlobalWorkflowShortcut({
+        key: "p",
+        code: "KeyP",
+        ctrlKey: true,
+        altKey: true,
+        preventDefault: () => { prevented++; },
+      }),
+      true,
+    );
+    assert.equal(planCalls, 1);
+    assert.equal(teamCalls, 0);
+    assert.equal(prevented, 1);
+
+    assert.equal(
+      handleGlobalWorkflowShortcut({
+        key: "t",
+        code: "KeyT",
+        ctrlKey: true,
+        altKey: true,
+        preventDefault: () => { prevented++; },
+      }),
+      true,
+    );
+    assert.equal(teamCalls, 1);
+    assert.equal(prevented, 2);
+
+    assert.equal(
+      handleGlobalWorkflowShortcut({
+        key: "p",
+        code: "KeyP",
+        ctrlKey: true,
+        altKey: true,
+        defaultPrevented: true,
+        preventDefault: () => { prevented++; },
+      }),
+      false,
+    );
+    assert.equal(planCalls, 1);
+  } finally {
+    registerWorkflowShortcutHandlers(null);
+  }
+
+  assert.equal(
+    handleGlobalWorkflowShortcut({
+      key: "p",
+      code: "KeyP",
+      ctrlKey: true,
+      altKey: true,
+    }),
+    false,
+  );
+});
