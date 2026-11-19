@@ -460,6 +460,7 @@ type ModelEntry = { id: string; name: string; provider: string; providerName: st
 type ModelsResponse = {
   models: Record<string, string>;
   modelList?: ModelEntry[];
+  freeModelList?: ModelEntry[];
   defaultModel?: SelectedModel | null;
   defaultThinkingLevel?: string | null;
   savedDefaultThinkingLevel?: string | null;
@@ -507,6 +508,8 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const [pendingBash, setPendingBash] = useState<PendingBash | null>(null);
   const [modelNames, setModelNames] = useState<Record<string, string>>({});
   const [modelList, setModelList] = useState<ModelEntry[]>([]);
+  const [freeModelList, setFreeModelList] = useState<ModelEntry[] | null>(null);
+  const [modelsRefreshing, setModelsRefreshing] = useState(false);
   const [modelError, setModelError] = useState<string | null>(null);
   // The session's or composer's folder, once a route said it no longer exists (#1422).
   // Kept apart by source: a model list read from a removed worktree's main repo
@@ -2904,6 +2907,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     setModelThinkingLevelMaps(d.thinkingLevelMaps ?? {});
     const nextModelList = d.modelList ?? [];
     setModelList(nextModelList);
+    setFreeModelList(d.freeModelList ?? null);
     const displayDefaultModel = d.defaultModel
       ? nextModelList.find((m) => m.id === d.defaultModel?.modelId && m.provider === d.defaultModel?.provider)
       : undefined;
@@ -2969,6 +2973,29 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     if (modelList.some((m) => m.provider === displayModel.provider && m.id === displayModel.modelId)) return;
     loadAllModels();
   }, [allModelList, displayModel, isModelScopeActive, loadAllModels, modelList]);
+
+  const refreshModels = useCallback(async () => {
+    if (modelsRefreshing) return;
+    setModelsRefreshing(true);
+    try {
+      const res = await fetch("/api/models/refresh", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{}",
+      });
+      const data = await res.json() as { completed?: boolean; reason?: string; error?: string };
+      if (!res.ok || data.error) throw new Error(data.error ?? `Failed to refresh models (HTTP ${res.status})`);
+      if (data.reason === "offline") {
+        addNotice({ type: "error", message: "PI_OFFLINE is set, so remote catalogs cannot be refreshed." });
+        return;
+      }
+      await loadModels();
+    } catch (e) {
+      addNotice({ type: "error", message: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setModelsRefreshing(false);
+    }
+  }, [addNotice, loadModels, modelsRefreshing]);
 
   // Picking a model or reasoning level is session-scoped, as in the TUI. The
   // selectors' star is the explicit Ctrl+S equivalent: it saves the global
@@ -3903,7 +3930,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   return {
     // State
     data, loading, error, activeLeafId, messages, activeToolResults, toolClocks, entryIds, messageKeys, historyCursor, hasEarlierMessages, earlierTurnCount, streamingStore,
-    agentRunning, modelNames, modelList, modelError, missingCwd, modelScopeWarnings, isModelScopeActive, allModelList, modelThinkingLevels, modelThinkingLevelMaps, newSessionModel, toolPreset, thinkingLevel,
+    agentRunning, modelNames, modelList, freeModelList, modelsRefreshing, modelError, missingCwd, modelScopeWarnings, isModelScopeActive, allModelList, modelThinkingLevels, modelThinkingLevelMaps, newSessionModel, toolPreset, thinkingLevel,
     retryInfo, contextUsage, systemPrompt, forkingEntryId,
     isCompacting, compactError, compactResult, currentModel, displayModel, modelSwitching, sessionStats, autoCompactionEnabled,
     slashCommands, slashCommandsLoading, queuedMessages,
@@ -3931,7 +3958,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     cancelEdit: editEntryId ? cancelEdit : undefined,
     addNotice,
     setNoticePaused: setPausedNoticeId,
-    handleToolPresetChange, handleThinkingLevelChange, handleSetDefaultModel, handleSetDefaultThinkingLevel, loadTools, loadSlashCommands, loadAllModels, reloadSession, setActiveLeafId, setData, setMessages, loadContext,
+    handleToolPresetChange, handleThinkingLevelChange, handleSetDefaultModel, handleSetDefaultThinkingLevel, loadTools, loadSlashCommands, loadAllModels, refreshModels, reloadSession, setActiveLeafId, setData, setMessages, loadContext,
     scrollToBottom, scrollUserMsgToTop, scrollToMessage,
     dispatch, setAgentRunning, setForkingEntryId,
     bashRunning, pendingBash,

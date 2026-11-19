@@ -10,6 +10,8 @@ export interface ModelsData {
     /** Dollars per 1M tokens, as the provider catalog lists them. */
     cost?: { input: number; output: number };
   }[];
+  /** All free models across configured providers, independent of `enabledModels`. */
+  freeModelList?: ModelsData["modelList"];
   defaultModel: { provider: string; modelId: string } | null;
   /** Resolved thinking level a new session starts with when the user has not picked one. */
   defaultThinkingLevel: string | null;

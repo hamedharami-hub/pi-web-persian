@@ -51,8 +51,13 @@ interface ModelSelectorProps {
   enableFavorites?: boolean;
   /** Every available model, once loaded; listed under "all". */
   allOptions?: ModelSelectorOption[] | null;
+  /** Free models across configured providers, independent of `enabledModels` scope. */
+  freeOptions?: ModelSelectorOption[] | null;
   /** Set only while `enabledModels` narrows `options`: shows pi's `/model` "scoped | all" row and loads `allOptions`. */
   onShowAll?: () => void;
+  /** Refresh remote provider catalogs on demand right from the selector. */
+  onRefresh?: () => void;
+  refreshing?: boolean;
 }
 
 const MODEL_FILTER_THRESHOLD = 8;
@@ -127,7 +132,10 @@ export function ModelSelector({
   onSetDefault,
   enableFavorites = true,
   allOptions,
+  freeOptions: freeOptionsProp,
   onShowAll,
+  onRefresh,
+  refreshing = false,
 }: ModelSelectorProps) {
   const { t } = useI18n();
   const isMobile = useIsMobile();
@@ -180,9 +188,11 @@ export function ModelSelector({
         })
         .filter((option): option is ModelSelectorOption => option !== undefined)
     : [];
-  const showFilter = Boolean(onShowAll) || (listed?.length ?? 0) > MODEL_FILTER_THRESHOLD;
-  const freeOptions = filterFreeModelOptions(listed ?? []);
-  const visibleOptions = listView === "free" ? filterFreeModelOptions(filteredOptions) : filteredOptions;
+  const showFilter = Boolean(onShowAll) || (listed?.length ?? 0) > MODEL_FILTER_THRESHOLD || (freeOptionsProp?.length ?? 0) > MODEL_FILTER_THRESHOLD;
+  const freeOptions = freeOptionsProp ?? filterFreeModelOptions(listed ?? []);
+  const visibleOptions = listView === "free"
+    ? (freeOptionsProp ? filterModelOptions(freeOptionsProp, filter) : filterFreeModelOptions(filteredOptions))
+    : filteredOptions;
   const modelsByProvider = groupModelOptions(visibleOptions);
   const starredOption = onSetDefault && listView === "all"
     ? findStarredModelOption(filteredOptions, defaultValue)
@@ -201,7 +211,7 @@ export function ModelSelector({
   };
 
   const currentName = selectedLabel ?? (value
-    ? (isListed(options, value) ?? isListed(allOptions, value))?.name ?? value.modelId
+    ? (isListed(options, value) ?? isListed(allOptions, value) ?? isListed(freeOptionsProp, value))?.name ?? value.modelId
     : emptyLabel ?? (options.length > 0 ? t("chat.selectModel") : t("chat.noModels")));
 
   useEffect(() => {
@@ -251,8 +261,8 @@ export function ModelSelector({
 
   // A catalog refresh can remove the last free model while the picker is open.
   useEffect(() => {
-    if (listed && listView === "free" && freeOptions.length === 0) setListView("all");
-  }, [listed, freeOptions.length, listView]);
+    if (!onRefresh && listed && listView === "free" && freeOptions.length === 0) setListView("all");
+  }, [listed, freeOptions.length, listView, onRefresh]);
 
   const buttonStyle: CSSProperties = variant === "field"
     ? {
@@ -312,7 +322,7 @@ export function ModelSelector({
       key={`${option.provider}:${option.modelId}`}
       active={option.modelId === value?.modelId && option.provider === value?.provider}
       onSelect={() => choose(option)}
-      star={onSetDefault && (!showAll || isListed(options, option)) ? {
+      star={onSetDefault && ((!showAll && listView === "all") || isListed(options, option)) ? {
         isDefault: option.modelId === defaultValue?.modelId && option.provider === defaultValue?.provider,
         saveLabel: t("chat.saveDefaultModel"),
         defaultLabel: t("chat.defaultModel"),
@@ -433,12 +443,12 @@ export function ModelSelector({
               boxShadow: openAbove ? "0 -4px 16px rgba(0,0,0,0.10)" : "0 4px 16px rgba(0,0,0,0.10)",
             }}
           >
-            {freeOptions.length > 0 && (
+            {(freeOptions.length > 0 || listView === "free" || onRefresh) && (
               <div
                 role="tablist"
                 aria-label={t("chat.modelListTabs")}
                 style={{
-                  display: "flex", flexShrink: 0, gap: 4,
+                  display: "flex", alignItems: "center", flexShrink: 0, gap: 4,
                   padding: "6px 8px", borderBottom: "1px solid var(--border)",
                 }}
               >
@@ -459,26 +469,68 @@ export function ModelSelector({
                 >
                   {t("chat.allModels")} ({listed?.length ?? 0})
                 </button>
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={listView === "free"}
-                  onClick={() => setListView("free")}
-                  style={{
-                    flex: 1, minWidth: 0, padding: "5px 8px",
-                    border: listView === "free" ? "1px solid var(--border)" : "1px solid transparent",
-                    borderRadius: 5,
-                    background: listView === "free" ? "var(--bg-hover)" : "transparent",
-                    color: listView === "free" ? "var(--text)" : "var(--text-dim)",
-                    cursor: "pointer", fontSize: 11, fontWeight: listView === "free" ? 600 : 400,
-                    whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
-                  }}
-                >
-                  {t("chat.freeModels")} ({freeOptions.length})
-                </button>
+                {(freeOptions.length > 0 || listView === "free") && (
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={listView === "free"}
+                    onClick={() => setListView("free")}
+                    style={{
+                      flex: 1, minWidth: 0, padding: "5px 8px",
+                      border: listView === "free" ? "1px solid var(--border)" : "1px solid transparent",
+                      borderRadius: 5,
+                      background: listView === "free" ? "var(--bg-hover)" : "transparent",
+                      color: listView === "free" ? "var(--text)" : "var(--text-dim)",
+                      cursor: "pointer", fontSize: 11, fontWeight: listView === "free" ? 600 : 400,
+                      whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+                    }}
+                  >
+                    {t("chat.freeModels")} ({freeOptions.length})
+                  </button>
+                )}
+                {onRefresh && (
+                  <button
+                    type="button"
+                    disabled={refreshing}
+                    onClick={onRefresh}
+                    aria-label={refreshing ? t("chat.refreshingModels") : t("chat.refreshModels")}
+                    title={refreshing ? t("chat.refreshingModels") : t("chat.refreshModels")}
+                    style={{
+                      flexShrink: 0,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      width: 26,
+                      height: 26,
+                      border: "1px solid transparent",
+                      borderRadius: 5,
+                      background: "transparent",
+                      color: "var(--text-dim)",
+                      cursor: refreshing ? "wait" : "pointer",
+                      opacity: refreshing ? 0.7 : 1,
+                    }}
+                  >
+                    <svg
+                      width="13"
+                      height="13"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      aria-hidden="true"
+                      style={refreshing ? { animation: "spin 0.8s linear infinite" } : undefined}
+                    >
+                      <polyline points="23 4 23 10 17 10" />
+                      <polyline points="1 20 1 14 7 14" />
+                      <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+                    </svg>
+                  </button>
+                )}
               </div>
             )}
-            {onShowAll && (
+            {onShowAll && listView === "all" && (
               <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "6px 8px 0", fontSize: 11 }}>
                 {[false, true].map((all) => (
                   <button
@@ -554,7 +606,7 @@ export function ModelSelector({
               ) : listView === "free" ? (
                 visibleOptions.length === 0 ? (
                   <div style={{ padding: "8px 12px", color: "var(--text-dim)", fontSize: 12, whiteSpace: "nowrap" }}>
-                    {t("chat.noMatchingModels")}
+                    {filter.trim() ? t("chat.noMatchingModels") : t("chat.noFreeModels")}
                   </div>
                 ) : visibleOptions.map((option) => renderModelRow(option, true))
               ) : (

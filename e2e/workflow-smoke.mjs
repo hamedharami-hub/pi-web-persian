@@ -100,13 +100,35 @@ try {
       await page.goto(base + "/?session=" + WORKFLOW, { waitUntil: "domcontentloaded" });
       const planOff = page.getByRole("button", { name: "Plan OFF · toggle (/plan)", exact: true });
       await planOff.waitFor();
+
+      const planPanel = page.locator(".extension-widget-panel.is-plan-todos");
+      await planPanel.waitFor();
+      assert.match(await planPanel.locator(".plan-widget-badge").innerText(), /Plan ready/);
+      assert.equal(await planPanel.locator(".plan-widget-progress-text").innerText(), "0/2");
+      assert.equal(await planPanel.locator(".plan-todo-list li").first().getAttribute("dir"), "auto");
+      assert.equal(await page.getByRole("button", { name: "▶ Execute (/plan execute)", exact: true }).count(), 0, "Redundant status Execute button is hidden while plan panel is expanded");
+      await planPanel.locator(".plan-widget-actions").getByRole("button", { name: "▶ Execute", exact: true }).waitFor();
+
+      await page.getByRole("button", { name: "Toggle step 1", exact: true }).click();
+      await planPanel.locator(".plan-widget-progress-text").filter({ hasText: "1/2" }).waitFor();
+      await page.getByRole("button", { name: "Toggle step 1", exact: true }).click();
+      await planPanel.locator(".plan-widget-progress-text").filter({ hasText: "0/2" }).waitFor();
+
+      const planTrigger = page.locator('.extension-widget-trigger[aria-controls]').filter({ hasText: "plan-todos" });
+      await planTrigger.click();
+      await page.getByRole("button", { name: "▶ Execute (/plan execute)", exact: true }).waitFor();
+      await planTrigger.click();
+      await planPanel.waitFor();
+      assert.equal(await page.getByRole("button", { name: "▶ Execute (/plan execute)", exact: true }).count(), 0);
+
       await planOff.click();
       const planOn = page.getByRole("button", { name: "Plan ON · toggle (/plan)", exact: true });
       await planOn.waitFor();
-      await planOn.click();
+      await planOn.focus();
+      await page.keyboard.press("Control+Alt+KeyP");
       await planOff.waitFor();
-      assert.ok(await page.getByRole("button", { name: "▶ Execute (/plan execute)", exact: true }).count(), "Saved checklist is still executable after off");
-      results.push(`${viewport.width}px: real plan toggle on/off and preserved checklist`);
+      assert.ok(await planPanel.locator(".plan-widget-actions").getByRole("button", { name: "▶ Execute", exact: true }).count(), "Saved checklist is still executable after off");
+      results.push(`${viewport.width}px: real plan toggle, shortcut, checklist toggle, and status dedupe`);
 
       const goalButton = page.getByRole("button", { name: "◎ Set goal (/goal)", exact: true });
       await goalButton.click();
@@ -114,16 +136,18 @@ try {
       await goalDialog.waitFor();
       await goalDialog.getByRole("textbox").fill("هدف آزمایشی بدون اجرای مدل");
       await goalDialog.getByRole("button", { name: "Submit", exact: true }).click();
-      const editGoal = page.getByRole("button", { name: "◎ Edit goal (/goal)", exact: true });
+      const editGoal = page.getByRole("button", { name: "◎ Edit goal · هدف آزمایشی بدون اجرای مدل (/goal)", exact: true });
       await editGoal.waitFor();
+      await page.getByRole("button", { name: "🗺 Plan goal (/goal plan)", exact: true }).waitFor();
+      const clearGoal = page.getByRole("button", { name: "✕ Clear goal (/goal clear)", exact: true });
+      await clearGoal.waitFor();
       await editGoal.click();
       await goalDialog.waitFor();
       assert.equal(await goalDialog.getByRole("textbox").inputValue(), "هدف آزمایشی بدون اجرای مدل");
       await goalDialog.getByRole("button", { name: "Cancel", exact: true }).click();
       await goalDialog.waitFor({ state: "hidden" });
-      results.push(`${viewport.width}px: real goal editor/save/prefill/cancel`);
-      await page.locator("textarea").last().fill("/goal clear");
-      await page.getByRole("button", { name: "Send", exact: true }).click();
+      results.push(`${viewport.width}px: real goal editor/save/prefill/cancel + goal chips`);
+      await clearGoal.click();
       await goalButton.waitFor();
 
       await page.getByRole("button", { name: "📋 Todos (/todos)", exact: true }).click();
@@ -131,7 +155,7 @@ try {
       await todos.waitFor();
       await todos.getByRole("button", { name: "Status / close", exact: true }).click();
       await todos.waitFor({ state: "hidden" });
-      assert.ok(await page.getByRole("button", { name: "▶ Execute (/plan execute)", exact: true }).count());
+      assert.ok(await planPanel.locator(".plan-widget-actions").getByRole("button", { name: "▶ Execute", exact: true }).count());
       results.push(`${viewport.width}px: todos action selector cancel/close keeps steps`);
 
       // Reload also checks warm replay and clears transient command toasts that
@@ -147,6 +171,20 @@ try {
       assert.equal(await planOff.isEnabled(), true);
       results.push(`${viewport.width}px: status commands disabled while editing history`);
       if (viewport.width > 600) {
+        await page.getByRole("button", { name: "Settings", exact: true }).click();
+        await page.getByRole("radio", { name: /فارسی/ }).click();
+        await page.getByRole("dialog", { name: "تنظیمات", exact: true }).waitFor();
+        assert.equal(await page.evaluate(() => document.documentElement.lang), "fa");
+        await page.getByRole("button", { name: "بستن", exact: true }).click();
+        await planPanel.waitFor();
+        await planPanel.locator(".plan-widget-actions").getByRole("button", { name: "⚡ خودکار", exact: true }).waitFor();
+        await page.getByRole("button", { name: "ارسال", exact: true }).waitFor();
+        await page.getByRole("button", { name: "تنظیمات", exact: true }).click();
+        await page.getByRole("radio", { name: /English/ }).click();
+        await page.getByRole("dialog", { name: "Settings", exact: true }).waitFor();
+        await page.getByRole("button", { name: "Close", exact: true }).click();
+        results.push(`${viewport.width}px: fa locale renders Persian workflow & composer UI cleanly`);
+
         const beforeDebug = requests.length;
         const debug = page.getByRole("button", { name: "Debug", exact: true });
         await debug.click();

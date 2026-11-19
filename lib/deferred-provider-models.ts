@@ -27,6 +27,16 @@ function catalog(): Map<string, RuntimeModel[]> {
   return globalThis.__piWebProviderModelCatalog;
 }
 
+function providerSignature(models: readonly RuntimeModel[]): string {
+  return models.map((m) => `${m.id}\u0000${m.name}`).join("\n");
+}
+
+/** Clear all remembered extension provider models so a manual refresh rebuilds them cleanly. */
+export function clearDeferredProviderModels(): void {
+  catalog().clear();
+  globalThis.__piWebProviderNameCatalog?.clear();
+}
+
 /** Record extension providers and virtual models for runtimes that have not registered them yet. */
 export async function rememberProviderModels(runtime: ModelRuntime): Promise<void> {
   const extensionProviders = new Set(runtime.getRegisteredProviderIds());
@@ -46,10 +56,13 @@ export async function rememberProviderModels(runtime: ModelRuntime): Promise<voi
   for (const provider of runtime.getProviders?.() ?? []) {
     if (byProvider.has(provider.id) && provider.name.trim()) globalThis.__piWebProviderNameCatalog.set(provider.id, provider.name.trim());
   }
-  const added = [...byProvider.keys()].some((provider) => !catalog().has(provider));
+  const changed = [...byProvider.entries()].some(([provider, models]) => {
+    const previous = catalog().get(provider);
+    return !previous || providerSignature(previous) !== providerSignature(models);
+  });
   for (const [provider, models] of byProvider) catalog().set(provider, models);
-  // A listing cached before this provider was known would hide it for the cache lifetime.
-  if (added) invalidateModelsCache();
+  // A listing cached before this provider changed would stay stale for the cache lifetime.
+  if (changed) invalidateModelsCache();
 }
 
 /**

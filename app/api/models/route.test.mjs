@@ -171,3 +171,42 @@ test("honors ?scope=all on demand and reports isScoped accurately", async () => 
     invalidateModelsCache();
   }
 });
+
+test("returns freeModelList across providers independent of enabledModels scope and excludes personal Google models", async () => {
+  await writeFile(join(agentDir, "models.json"), JSON.stringify({
+    providers: {
+      acme: {
+        baseUrl: "https://example.invalid/v1",
+        apiKey: "sk-test",
+        api: "openai-completions",
+        models: [
+          { id: "paid", name: "Acme Paid", cost: { input: 1, output: 2, cacheRead: 0, cacheWrite: 0 } },
+          { id: "gift:free", name: "Acme Gift", cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } },
+        ],
+      },
+      personalgoogle: {
+        baseUrl: "https://generativelanguage.googleapis.com/v1beta",
+        apiKey: "sk-goog",
+        api: "google-generative-ai",
+        models: [
+          { id: "gemini-4-argon", name: "Gemini 4 Argon", cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } },
+        ],
+      },
+    },
+  }, null, 2));
+  await writeFile(join(agentDir, "settings.json"), JSON.stringify({
+    enabledModels: ["acme/paid"],
+  }, null, 2));
+  invalidateModelsCache();
+
+  try {
+    const scoped = await models(repo);
+    assert.equal(scoped.status, 200);
+    assert.equal(scoped.body.isScoped, true);
+    assert.deepEqual(scoped.body.modelList.map((m) => `${m.provider}:${m.id}`), ["acme:paid"]);
+    assert.deepEqual(scoped.body.freeModelList.map((m) => `${m.provider}:${m.id}`), ["acme:gift:free"]);
+  } finally {
+    await rm(join(agentDir, "settings.json"), { force: true });
+    invalidateModelsCache();
+  }
+});

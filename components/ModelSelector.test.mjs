@@ -59,3 +59,14 @@ test("names a current model outside the scope from the loaded full list", () => 
 
   assert.match(html, /GPT-6 Luna/);
 });
+
+test("names a current model from freeOptions when outside the scoped list", () => {
+  const html = render({
+    options: [{ provider: "google", modelId: "gemini-4", name: "Gemini 4" }],
+    freeOptions: [{ provider: "openrouter", modelId: "openrouter/free", name: "Free Models Router", free: true }],
+    value: { provider: "openrouter", modelId: "openrouter/free" },
+    onRefresh() {},
+  });
+
+  assert.match(html, /Free Models Router/);
+});

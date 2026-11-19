@@ -16,6 +16,7 @@ import { llamaCppExtension } from "@/lib/pi-sdk-internals";
 import { providerDisplayNames, rememberProviderModels, withDeferredProviderModels } from "@/lib/deferred-provider-models";
 import { inferRemovedWorktree } from "@/lib/worktree";
 import { cwdMissingBody } from "@/lib/missing-cwd";
+import { filterStaleLiveModels } from "@/lib/live-free-sync";
 import { isFreeModel } from "@/lib/model-free";
 
 export const dynamic = "force-dynamic";
@@ -42,14 +43,17 @@ async function loadModels(cwd: string, scopeAll = false): Promise<ModelsData> {
   const settings: SettingsManager = services.settingsManager;
   await rememberProviderModels(services.modelRuntime);
   const providerNames = providerDisplayNames(services.modelRuntime);
-  // `enabledModels` supports globs and fuzzy patterns, so resolve it the same
-  // way the CLI does instead of comparing pattern strings literally (#307).
-  const scope = await resolveVisibleModels(
-    withDeferredProviderModels(services.modelRuntime),
-    scopeAll ? undefined : settings.getEnabledModels(),
-  );
-  const { visible, thinkingLevelPins, warnings } = scope;
-  modelList = orderSelectorModels(scope).map((m) => ({
+  const runtimeWithDeferred = withDeferredProviderModels(services.modelRuntime);
+  const customProviderCache = new Map<string, boolean>();
+  const isCustomModelsJsonProvider = (providerId: string): boolean => {
+    const cached = customProviderCache.get(providerId);
+    if (cached !== undefined) return cached;
+    const source = services.modelRuntime.getProviderAuthStatus(providerId).source;
+    const custom = source === "models_json_key" || source === "models_json_command";
+    customProviderCache.set(providerId, custom);
+    return custom;
+  };
+  const toModelEntry = (m: (typeof visible)[number]) => ({
     id: m.id,
     name: m.name,
     provider: m.provider,
@@ -57,12 +61,42 @@ async function loadModels(cwd: string, scopeAll = false): Promise<ModelsData> {
     // name; models.json providers get theirs from `name` too.
     providerName: providerNames.get(m.provider) ?? m.provider,
     input: m.input,
-    free: isFreeModel(m),
+    free: isFreeModel({
+      id: m.id,
+      provider: m.provider,
+      baseUrl: m.baseUrl,
+      api: m.api,
+      isCustomProvider: isCustomModelsJsonProvider(m.provider),
+      cost: m.cost,
+    }),
     ...(m.cost && (m.cost.input > 0 || m.cost.output > 0)
       ? { cost: { input: m.cost.input, output: m.cost.output } }
       : {}),
+  });
+
+  // `enabledModels` supports globs and fuzzy patterns, so resolve it the same
+  // way the CLI does instead of comparing pattern strings literally (#307).
+  const scope = await resolveVisibleModels(
+    runtimeWithDeferred,
+    scopeAll ? undefined : settings.getEnabledModels(),
+  );
+  const { thinkingLevelPins, warnings } = scope;
+  const visible = await filterStaleLiveModels(scope.visible, agentDir);
+  modelList = orderSelectorModels({ ...scope, visible }).map(toModelEntry);
+  const allAvailable = await filterStaleLiveModels(await runtimeWithDeferred.getAvailable(), agentDir);
+  const freeModels = [...allAvailable]
+    .sort((a, b) => a.provider.localeCompare(b.provider))
+    .map(toModelEntry)
+    .filter((entry) => entry.free);
+  const freeRawModels = allAvailable.filter((m) => isFreeModel({
+    id: m.id,
+    provider: m.provider,
+    baseUrl: m.baseUrl,
+    api: m.api,
+    isCustomProvider: isCustomModelsJsonProvider(m.provider),
+    cost: m.cost,
   }));
-  for (const m of visible) {
+  for (const m of [...visible, ...freeRawModels]) {
     const key = `${m.provider}:${m.id}`;
     nameMap.set(key, m.name);
     thinkingLevels[key] = getSupportedThinkingLevels(m);
@@ -90,6 +124,7 @@ async function loadModels(cwd: string, scopeAll = false): Promise<ModelsData> {
     {
       models: Object.fromEntries(nameMap),
       modelList,
+      freeModelList: freeModels,
       defaultModel,
       defaultThinkingLevel,
       savedDefaultThinkingLevel: settings.getDefaultThinkingLevel() ?? null,

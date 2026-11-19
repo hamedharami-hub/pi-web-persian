@@ -1,5 +1,7 @@
-import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
-import { createModelRuntimeWithExtensions } from "@/lib/model-runtime";
+import { getAgentDir, type ModelRuntime } from "@earendil-works/pi-coding-agent";
+import { clearDeferredProviderModels } from "@/lib/deferred-provider-models";
+import { reconcileLiveFreeCatalogs } from "@/lib/live-free-sync";
+import { createModelRuntimeWithExtensions, invalidateModelRuntimeWithExtensions } from "@/lib/model-runtime";
 import { invalidateModelsCache } from "@/lib/models-cache";
 
 /**
@@ -115,10 +117,19 @@ export async function refreshModelCatalogs(
   }
 
   // A pass that failed for one provider can still have persisted another's
-  // catalog, so compare regardless of the outcome.
-  const changed = modelCatalogSignature(runtime.getModels()) !== before;
-  if (changed) invalidateModelsCache();
-  return { completed, changed };
+  // catalog, so also reconcile live free providers and drop stale caches.
+  const synced = await reconcileLiveFreeCatalogs({
+    agentDir: getAgentDir(),
+    providers: options.providers,
+    signal,
+  }).catch(() => ({ changed: false }));
+  const changed = synced.changed || modelCatalogSignature(runtime.getModels()) !== before;
+  if (changed || completed) {
+    clearDeferredProviderModels();
+    invalidateModelRuntimeWithExtensions();
+    invalidateModelsCache();
+  }
+  return { completed: completed || synced.changed, changed };
 }
 
 declare global {
